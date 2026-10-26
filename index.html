@@ -70,6 +70,17 @@ button:disabled{opacity:.5;cursor:default}
 .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet .box{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
 .note{font-size:13px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field input,.field select{width:100%}
+.err{color:var(--bad);font-size:14px;min-height:1em}
+.cat{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;border-top:1px solid var(--line)}
+.cat:first-of-type{border-top:0}
+.cat .name{font:700 17px/1.1 var(--f-display);text-transform:uppercase;letter-spacing:.03em}
+.cat .pl{font:500 17px/1 var(--f-num);text-align:right}
+.cat .det{grid-column:1/-1;font-size:13px;color:var(--muted)}
+.bar{grid-column:1/-1;position:relative;height:8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--clay)}
+.bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--fg)}
 details summary{cursor:pointer;font-weight:600}
 @media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -119,6 +130,8 @@ details summary{cursor:pointer;font-weight:600}
       </div>
       <div class="note" id="s-exp"></div>
     </div>
+    <button id="add-manual" class="primary">+ Ajouter un pari (aces, feeling…)</button>
+    <div class="panel"><div class="label">Par type de pari</div><div id="catstats"></div></div>
     <div class="panel" id="betlist"></div>
   </section>
 </div>
@@ -140,6 +153,26 @@ details summary{cursor:pointer;font-weight:600}
     </div>
     <p class="note">Corrige la cote si elle a bougé chez le bookmaker.</p>
     <div class="row"><button id="sh-cancel" class="grow">Annuler</button><button id="sh-ok" class="primary grow">Enregistrer</button></div>
+  </div>
+</div>
+
+<div id="msheet" class="sheet" hidden>
+  <div class="box">
+    <div class="label">Nouveau pari</div>
+    <div class="row">
+      <div class="field grow"><label class="label" for="m-cat">Type</label>
+        <select id="m-cat"><option value="aces">Aces</option><option value="feeling">Feeling</option><option value="autre">Autre</option></select></div>
+      <div class="field grow"><label class="label" for="m-book">Bookmaker</label>
+        <select id="m-book"><option>Winamax</option><option>Betclic</option><option>Unibet</option><option>Parions Sport</option><option>PMU</option><option>NetBet</option><option>Autre</option></select></div>
+    </div>
+    <div class="field"><label class="label" for="m-match">Match</label><input id="m-match" type="text" placeholder="Ex. Sinner – Alcaraz"></div>
+    <div class="field"><label class="label" for="m-pick">Pari</label><input id="m-pick" type="text" placeholder="Ex. Plus d'aces : Sinner"></div>
+    <div class="row">
+      <div class="field grow"><label class="label" for="m-odds">Cote</label><input id="m-odds" class="num" type="number" step="0.01" inputmode="decimal"></div>
+      <div class="field grow"><label class="label" for="m-stake">Mise €</label><input id="m-stake" class="num" type="number" step="0.5" inputmode="decimal"></div>
+    </div>
+    <div id="m-err" class="err"></div>
+    <div class="row"><button id="m-cancel" class="grow">Annuler</button><button id="m-ok" class="primary grow">Enregistrer</button></div>
   </div>
 </div>
 
@@ -253,30 +286,56 @@ $("sh-ok").onclick=()=>{
   if(!pending){$("sheet").hidden=true;return}
   const price=parseFloat(String($("sh-odds").value).replace(",",".")),stake=parseFloat(String($("sh-stake").value).replace(",","."));
   if(!(price>1)||!(stake>0)){$("sh-title").textContent="Cote et mise doivent être des nombres positifs.";return}
-  bets.unshift({id:Date.now().toString(36),...pending,price,stake,edge:price*pending.p-1,status:"open",at:new Date().toISOString()});
+  bets.unshift({id:Date.now().toString(36),cat:"value",...pending,price,stake,edge:price*pending.p-1,status:"open",at:new Date().toISOString()});
   store.set("vbt_bets",bets);$("sheet").hidden=true;pending=null;renderBets();setTab("bets");
 };
 function profit(b){return b.status==="won"?b.stake*(b.price-1):b.status==="lost"?-b.stake:0}
 function renderBets(){
   const settled=bets.filter(b=>b.status==="won"||b.status==="lost");
   const stk=settled.reduce((s,b)=>s+b.stake,0),pl=settled.reduce((s,b)=>s+profit(b),0);
-  const exp=settled.reduce((s,b)=>s+b.stake*b.edge,0);
+  const exp=settled.filter(b=>b.edge!=null).reduce((s,b)=>s+b.stake*b.edge,0);
   $("s-n").textContent=bets.length;$("s-stk").textContent=eur(stk);
   $("s-pl").textContent=eur(pl);$("s-pl").className="v num "+(pl>0?"pos":pl<0?"neg":"");
   $("s-roi").textContent=stk?pct(pl/stk):"–";
-  $("s-exp").textContent=settled.length?`Gain théorique attendu : ${eur(exp)}. L'écart avec ton résultat réel, c'est la variance : il se resserre avec le nombre de paris.`:"Clique « Parier » sur un value bet pour l'ajouter ici, puis note le résultat après le match.";
+  $("s-exp").textContent=settled.length?`Gain théorique attendu sur les value bets : ${eur(exp)}. L'écart avec ton résultat réel, c'est la variance : il se resserre avec le nombre de paris.`:"Clique « Parier » sur un value bet pour l'ajouter ici, puis note le résultat après le match.";
+  renderCats();
   const L=$("betlist");
   if(!bets.length){L.innerHTML='<span class="note">Aucun pari enregistré pour l\'instant.</span>';return}
   const lab={open:"En cours",won:"Gagné",lost:"Perdu",void:"Annulé"};
   L.innerHTML=bets.map(b=>`<div class="bet"><div class="top"><b>${esc(b.player)}</b><span class="st ${b.status}">${lab[b.status]}</span></div>
-  <div class="note">${esc(b.match)} · ${esc(b.book)}${b.demo?' · <span class="chip demo">Exemple</span>':""}</div>
-  <div class="row num" style="font-size:14px">Cote ${odd(b.price)} · Mise ${eur(b.stake)} · Avantage ${pct(b.edge)}${b.status!=="open"?" · "+eur(profit(b)):""}</div>
+  <div class="note"><span class="chip">${CATS[b.cat||"value"]}</span> ${esc(b.match)} · ${esc(b.book)}${b.demo?' · <span class="chip demo">Exemple</span>':""}</div>
+  <div class="row num" style="font-size:14px">Cote ${odd(b.price)} · Mise ${eur(b.stake)}${b.edge!=null?' · Avantage '+pct(b.edge):''}${b.status!=="open"?" · "+eur(profit(b)):""}</div>
   <div class="row">${b.status==="open"?`<button class="small" data-s="won" data-id="${b.id}">Gagné</button><button class="small" data-s="lost" data-id="${b.id}">Perdu</button><button class="small" data-s="void" data-id="${b.id}">Annulé</button>`:`<button class="small" data-s="open" data-id="${b.id}">Rouvrir</button>`}<button class="small" data-del="${b.id}">Supprimer</button></div></div>`).join("");
   L.querySelectorAll("button[data-s]").forEach(x=>x.onclick=()=>{const b=bets.find(b=>b.id===x.dataset.id);b.status=x.dataset.s;store.set("vbt_bets",bets);renderBets()});
   L.querySelectorAll("button[data-del]").forEach(x=>x.onclick=()=>{
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
     else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
 }
+const CATS={value:"Value bets",aces:"Aces",feeling:"Feeling",autre:"Autre"};
+function renderCats(){
+  const box=$("catstats"),rows=[];
+  for(const c of Object.keys(CATS)){
+    const all=bets.filter(b=>(b.cat||"value")===c);if(!all.length)continue;
+    const st=all.filter(b=>b.status==="won"||b.status==="lost");
+    const w=st.filter(b=>b.status==="won").length,stk=st.reduce((s,b)=>s+b.stake,0),pl=st.reduce((s,b)=>s+profit(b),0);
+    const wr=st.length?w/st.length:0,be=st.length?st.reduce((s,b)=>s+1/b.price,0)/st.length:0;
+    const det=st.length?`${w}/${st.length} gagnés (${pct(wr)}) · il faut ${pct(be)} pour être rentable à tes cotes · ROI ${stk?pct(pl/stk):"–"}`:`${all.length} en cours, aucun résultat noté`;
+    rows.push(`<div class="cat"><span class="name">${CATS[c]}</span><span class="pl ${pl>0?"pos":pl<0?"neg":""}">${eur(pl)}</span>
+      ${st.length?`<div class="bar" title="Réussite vs seuil de rentabilité"><i style="width:${Math.min(100,wr*100)}%"></i><b style="left:${Math.min(100,be*100)}%"></b></div>`:""}
+      <span class="det">${det}</span></div>`);
+  }
+  box.innerHTML=rows.length?rows.join("")+'<p class="note">Barre : ton taux de réussite. Trait noir : le taux minimum pour gagner de l\'argent à tes cotes.</p>':'<span class="note">Les statistiques apparaîtront ici après tes premiers paris.</span>';
+}
+$("add-manual").onclick=()=>{$("m-err").textContent="";$("m-stake").value=$("stake").value||5;$("msheet").hidden=false};
+$("m-cancel").onclick=()=>{$("msheet").hidden=true};
+$("m-ok").onclick=()=>{
+  const n=id=>parseFloat(String($(id).value).replace(",","."));
+  const price=n("m-odds"),stake=n("m-stake"),match=$("m-match").value.trim(),pick=$("m-pick").value.trim();
+  if(!match||!pick){$("m-err").textContent="Indique le match et le pari.";return}
+  if(!(price>1)||!(stake>0)){$("m-err").textContent="La cote doit dépasser 1 et la mise être positive.";return}
+  bets.unshift({id:Date.now().toString(36),cat:$("m-cat").value,match,player:pick,book:$("m-book").value,price,stake,p:null,edge:null,status:"open",at:new Date().toISOString()});
+  store.set("vbt_bets",bets);$("msheet").hidden=true;$("m-match").value="";$("m-pick").value="";$("m-odds").value="";renderBets();
+};
 function setTab(t){$("view-scan").hidden=t!=="scan";$("view-bets").hidden=t!=="bets";$("tab-scan").setAttribute("aria-selected",t==="scan");$("tab-bets").setAttribute("aria-selected",t==="bets")}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-bets").onclick=()=>setTab("bets");
 $("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=()=>{if($("status").textContent.startsWith("Exemple"))showDemo()};
