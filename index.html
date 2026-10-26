@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Value Bets Tennis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout : une colonne mobile, onglets en bas façon appli ; terre battue + lignes de craie */
+:root{
+  --bg:#f3efe8; --surface:#fffdf9; --line:#e2d9cc; --fg:#2a211b; --muted:#7a6c60;
+  --clay:#b4532a; --clay-soft:#f4e1d6; --good:#2f7a4b; --good-soft:#dcefe3; --bad:#b23a3a; --bad-soft:#f6dddd;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,sans-serif;
+  --f-num:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#1a1512; --surface:#241d18; --line:#3a2f27; --fg:#f1e9e1; --muted:#a8998b;
+  --clay:#e07a4c; --clay-soft:#3d261a; --good:#5cc187; --good-soft:#1d3326; --bad:#ec7b7b; --bad-soft:#3b1f1f;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--f-body);
+  padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) calc(84px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding-top:14px}
+h1{font:700 30px/1 var(--f-display);letter-spacing:.01em;margin:0;text-transform:uppercase}
+h1 span{color:var(--clay)}
+.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+.label{font:600 12px/1 var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--clay);outline-offset:2px}
+button{font:600 15px/1 var(--f-body);border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:11px 14px;cursor:pointer}
+button.primary{background:var(--clay);border-color:var(--clay);color:#fff}
+button.small{padding:7px 10px;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+.grow{flex:1}
+.status{font-size:14px;color:var(--muted)}
+.status.err{color:var(--bad)}
+.match{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.match.hit{border-left:4px solid var(--clay)}
+.mhead{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted)}
+.players{font:600 17px/1.25 var(--f-body)}
+.vb{display:grid;grid-template-columns:1fr auto auto;gap:4px 10px;align-items:center;padding:8px 10px;border-radius:8px;background:var(--clay-soft)}
+.vb .who{min-width:0}
+.vb .who b{display:block}
+.vb .who small{color:var(--muted)}
+.edge{font:700 18px/1 var(--f-num);color:var(--clay)}
+.fair{font-size:12px;color:var(--muted)}
+.chip{font:600 11px/1 var(--f-body);text-transform:uppercase;letter-spacing:.06em;padding:4px 7px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.chip.demo{background:var(--clay-soft);color:var(--clay);border-color:transparent}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{display:flex;flex-direction:column;gap:4px}
+.stat .v{font:500 18px/1 var(--f-num)}
+.pos{color:var(--good)} .neg{color:var(--bad)}
+.bet{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.bet:first-child{border-top:0}
+.bet .top{display:flex;justify-content:space-between;gap:8px}
+.st{font:600 12px/1 var(--f-body);padding:4px 8px;border-radius:99px}
+.st.won{background:var(--good-soft);color:var(--good)} .st.lost{background:var(--bad-soft);color:var(--bad)} .st.open{background:var(--bg);color:var(--muted);border:1px solid var(--line)} .st.void{background:var(--bg);color:var(--muted)}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--surface);border-top:1px solid var(--line);
+  padding:6px max(16px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.tabs button{flex:1;border:0;background:none;color:var(--muted);font:700 15px/1 var(--f-display);text-transform:uppercase;letter-spacing:.05em;padding:12px 4px}
+.tabs button[aria-selected="true"]{color:var(--clay)}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet .box{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.note{font-size:13px;color:var(--muted)}
+details summary{cursor:pointer;font-weight:600}
+@media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Value Bets <span>Tennis</span></h1>
+    <p class="sub">Cotes françaises comparées à la cote « juste » de Pinnacle, marge retirée.</p>
+  </header>
+
+  <section id="view-scan" class="wrap" style="padding:0">
+    <div class="panel">
+      <div class="row">
+        <input id="apikey" class="grow" type="password" placeholder="Clé The Odds API" autocomplete="off">
+        <button id="savekey" class="small">Enregistrer</button>
+      </div>
+      <div class="row">
+        <label class="label" for="minedge">Avantage min.</label>
+        <select id="minedge"><option value="0.01">1 %</option><option value="0.02" selected>2 %</option><option value="0.03">3 %</option><option value="0.05">5 %</option></select>
+        <label class="label" for="stake">Mise</label>
+        <input id="stake" class="num" type="number" inputmode="decimal" min="0" step="0.5" value="5" style="width:80px"> €
+      </div>
+      <div class="row">
+        <button id="scan" class="primary grow">Chercher les value bets</button>
+        <button id="demo" class="small">Exemple</button>
+      </div>
+      <div id="status" class="status">Exemple chargé ci-dessous. Ajoute ta clé pour les vraies cotes.</div>
+    </div>
+    <div id="results" class="wrap" style="padding:0"></div>
+    <details class="panel">
+      <summary>Comment ça marche</summary>
+      <p class="note">La cote Pinnacle est la plus juste du marché. On lui retire sa marge pour obtenir la probabilité réelle de chaque joueur. Si un bookmaker français paie plus que cette probabilité ne le justifie, c'est un value bet : avantage = cote × probabilité − 1.</p>
+      <p class="note">Une recherche consomme 1 crédit par tournoi actif (offre gratuite : 500 crédits par mois). Les cotes Pinnacle peuvent avoir un léger retard : revérifie la cote chez le bookmaker avant de miser.</p>
+      <p class="note">Rentable seulement sur des centaines de paris, avec des séries perdantes normales. Fixe un budget et n'y touche pas.</p>
+    </details>
+  </section>
+
+  <section id="view-bets" class="wrap" style="padding:0" hidden>
+    <div class="panel">
+      <div class="stats">
+        <div class="stat"><span class="label">Paris</span><span id="s-n" class="v">0</span></div>
+        <div class="stat"><span class="label">Misé</span><span id="s-stk" class="v">0 €</span></div>
+        <div class="stat"><span class="label">Résultat</span><span id="s-pl" class="v">0 €</span></div>
+        <div class="stat"><span class="label">ROI</span><span id="s-roi" class="v">–</span></div>
+      </div>
+      <div class="note" id="s-exp"></div>
+    </div>
+    <div class="panel" id="betlist"></div>
+  </section>
+</div>
+
+<nav class="tabs" role="tablist">
+  <button id="tab-scan" role="tab" aria-selected="true">Recherche</button>
+  <button id="tab-bets" role="tab" aria-selected="false">Mes paris</button>
+</nav>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="box">
+    <div class="label">Enregistrer le pari</div>
+    <div id="sh-title" class="players"></div>
+    <div class="row">
+      <label class="label" for="sh-odds">Cote prise</label>
+      <input id="sh-odds" class="num" type="number" step="0.01" inputmode="decimal" style="width:90px">
+      <label class="label" for="sh-stake">Mise €</label>
+      <input id="sh-stake" class="num" type="number" step="0.5" inputmode="decimal" style="width:90px">
+    </div>
+    <p class="note">Corrige la cote si elle a bougé chez le bookmaker.</p>
+    <div class="row"><button id="sh-cancel" class="grow">Annuler</button><button id="sh-ok" class="primary grow">Enregistrer</button></div>
+  </div>
+</div>
+
+<script>
+const BOOKS={winamax_fr:"Winamax",betclic_fr:"Betclic",unibet_fr:"Unibet",parionssport_fr:"Parions Sport",pmu_fr:"PMU",netbet_fr:"NetBet"};
+const SHARP="pinnacle";
+const API="https://api.the-odds-api.com/v4";
+const $=id=>document.getElementById(id);
+const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let bets=store.get("vbt_bets",[]);
+let pending=null;
+const eur=n=>(n<0?"−":"")+Math.abs(n).toFixed(2).replace(".",",")+" €";
+const pct=n=>(n*100).toFixed(1).replace(".",",")+" %";
+const odd=n=>n.toFixed(2).replace(".",",");
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+$("apikey").value=store.get("vbt_key","");
+$("savekey").onclick=()=>{store.set("vbt_key",$("apikey").value.trim());setStatus("Clé enregistrée sur cet appareil.")};
+function setStatus(t,err){$("status").textContent=t;$("status").className="status"+(err?" err":"")}
+
+// Calcul : probabilité juste Pinnacle (marge retirée), puis avantage des books FR
+function analyse(events,minEdge){
+  const out=[];
+  for(const ev of events){
+    const books=ev.bookmakers||[];
+    const sharp=books.find(b=>b.key===SHARP);
+    const sm=sharp&&sharp.markets.find(m=>m.key==="h2h");
+    if(!sm||sm.outcomes.length!==2)continue;
+    const inv=sm.outcomes.map(o=>1/o.price), tot=inv[0]+inv[1];
+    const fair={}; sm.outcomes.forEach((o,i)=>fair[o.name]=inv[i]/tot);
+    const hits=[];
+    for(const b of books){
+      if(!BOOKS[b.key])continue;
+      const m=b.markets.find(m=>m.key==="h2h"); if(!m)continue;
+      for(const o of m.outcomes){
+        const p=fair[o.name]; if(!p)continue;
+        const edge=o.price*p-1;
+        if(edge>=minEdge)hits.push({book:BOOKS[b.key],player:o.name,price:o.price,p,edge});
+      }
+    }
+    if(hits.length){
+      hits.sort((a,b)=>b.edge-a.edge);
+      // une ligne par joueur : le meilleur bookmaker
+      const best={};hits.forEach(h=>{if(!best[h.player])best[h.player]=h});
+      out.push({id:ev.id,tour:ev.sport_title,start:ev.commence_time,players:ev.home_team+" – "+ev.away_team,hits:Object.values(best)});
+    }
+  }
+  return out.sort((a,b)=>b.hits[0].edge-a.hits[0].edge);
+}
+
+function render(list,demo){
+  const r=$("results");
+  if(!list.length){r.innerHTML='<div class="panel"><b>Aucun value bet au-dessus du seuil.</b><span class="note">Normal : ils sont rares et partent vite. Réessaie plus tard ou baisse le seuil.</span></div>';return}
+  r.innerHTML=list.map((m,i)=>{
+    const d=new Date(m.start);
+    const when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})+" · "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+    return `<div class="match hit"><div class="mhead"><span>${esc(m.tour)}</span><span>${when}${demo?' <span class="chip demo">Exemple</span>':""}</span></div>
+    <div class="players">${esc(m.players)}</div>
+    ${m.hits.map((h,j)=>`<div class="vb"><div class="who"><b>${esc(h.player)}</b><small>${esc(h.book)} · cote <span class="num">${odd(h.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/h.p)}</span> · proba ${pct(h.p)}</div></div>
+      <span class="edge">+${pct(h.edge)}</span><button class="small" data-m="${i}" data-h="${j}">Parier</button></div>`).join("")}</div>`}).join("");
+  r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo})});
+}
+
+async function scan(){
+  const key=$("apikey").value.trim();
+  if(!key){setStatus("Ajoute d'abord ta clé The Odds API (gratuite sur the-odds-api.com).",true);return}
+  store.set("vbt_key",key);
+  $("scan").disabled=true;setStatus("Recherche des tournois en cours…");
+  try{
+    const sr=await fetch(`${API}/sports?apiKey=${encodeURIComponent(key)}`);
+    if(sr.status===401)throw new Error("Clé refusée : vérifie-la sur the-odds-api.com.");
+    if(!sr.ok)throw new Error("L'API ne répond pas ("+sr.status+"). Réessaie dans un moment.");
+    const sports=(await sr.json()).filter(s=>s.group==="Tennis"&&s.active&&!s.has_outrights);
+    if(!sports.length){setStatus("Aucun tournoi de tennis actif en ce moment.");render([]);return}
+    const bk=[SHARP,...Object.keys(BOOKS)].join(",");
+    let all=[],left="?";
+    for(const s of sports){
+      setStatus("Lecture des cotes : "+s.title+"…");
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h&oddsFormat=decimal`);
+      left=r.headers.get("x-requests-remaining")||left;
+      if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
+      if(r.ok)all=all.concat(await r.json());
+    }
+    const now=Date.now();
+    all=all.filter(e=>new Date(e.commence_time).getTime()>now); // avant-match uniquement
+    const res=analyse(all,+$("minedge").value);
+    render(res,false);
+    setStatus(`${all.length} matchs analysés sur ${sports.length} tournoi(s) · ${res.length} avec value · crédits restants : ${left}`);
+  }catch(e){
+    setStatus(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true);
+  }finally{$("scan").disabled=false}
+}
+
+function demoData(){
+  const t=h=>new Date(Date.now()+h*3600e3).toISOString();
+  const mk=(id,tour,start,a,b,pin,fr)=>({id,sport_title:tour,commence_time:start,home_team:a,away_team:b,bookmakers:[
+    {key:"pinnacle",markets:[{key:"h2h",outcomes:[{name:a,price:pin[0]},{name:b,price:pin[1]}]}]},
+    ...fr.map(([k,x,y])=>({key:k,markets:[{key:"h2h",outcomes:[{name:a,price:x},{name:b,price:y}]}]}))]});
+  return [
+    mk("d1","ATP Paris",t(5),"Joueur A","Joueur B",[1.62,2.42],[["winamax_fr",1.58,2.55],["betclic_fr",1.60,2.45]]),
+    mk("d2","WTA",t(9),"Joueuse C","Joueuse D",[2.10,1.78],[["unibet_fr",2.28,1.70],["parionssport_fr",2.05,1.75]]),
+    mk("d3","ATP Challenger",t(20),"Joueur E","Joueur F",[1.30,3.70],[["winamax_fr",1.28,3.60]])
+  ];
+}
+function showDemo(){render(analyse(demoData(),+$("minedge").value),true);setStatus("Exemple fictif (joueurs inventés). Ajoute ta clé pour les vraies cotes.")}
+
+// Suivi des paris
+function openSheet(b){pending=b;$("sh-title").textContent=b.player+" chez "+b.book;$("sh-odds").value=b.price.toFixed(2);$("sh-stake").value=$("stake").value||5;$("sheet").hidden=false}
+$("sh-cancel").onclick=()=>{$("sheet").hidden=true;pending=null};
+$("sh-ok").onclick=()=>{
+  const price=parseFloat(String($("sh-odds").value).replace(",",".")),stake=parseFloat(String($("sh-stake").value).replace(",","."));
+  if(!(price>1)||!(stake>0)){$("sh-title").textContent="Cote et mise doivent être des nombres positifs.";return}
+  bets.unshift({id:Date.now().toString(36),...pending,price,stake,edge:price*pending.p-1,status:"open",at:new Date().toISOString()});
+  store.set("vbt_bets",bets);$("sheet").hidden=true;pending=null;renderBets();setTab("bets");
+};
+function profit(b){return b.status==="won"?b.stake*(b.price-1):b.status==="lost"?-b.stake:0}
+function renderBets(){
+  const settled=bets.filter(b=>b.status==="won"||b.status==="lost");
+  const stk=settled.reduce((s,b)=>s+b.stake,0),pl=settled.reduce((s,b)=>s+profit(b),0);
+  const exp=settled.reduce((s,b)=>s+b.stake*b.edge,0);
+  $("s-n").textContent=bets.length;$("s-stk").textContent=eur(stk);
+  $("s-pl").textContent=eur(pl);$("s-pl").className="v num "+(pl>0?"pos":pl<0?"neg":"");
+  $("s-roi").textContent=stk?pct(pl/stk):"–";
+  $("s-exp").textContent=settled.length?`Gain théorique attendu : ${eur(exp)}. L'écart avec ton résultat réel, c'est la variance : il se resserre avec le nombre de paris.`:"Clique « Parier » sur un value bet pour l'ajouter ici, puis note le résultat après le match.";
+  const L=$("betlist");
+  if(!bets.length){L.innerHTML='<span class="note">Aucun pari enregistré pour l\'instant.</span>';return}
+  const lab={open:"En cours",won:"Gagné",lost:"Perdu",void:"Annulé"};
+  L.innerHTML=bets.map(b=>`<div class="bet"><div class="top"><b>${esc(b.player)}</b><span class="st ${b.status}">${lab[b.status]}</span></div>
+  <div class="note">${esc(b.match)} · ${esc(b.book)}${b.demo?' · <span class="chip demo">Exemple</span>':""}</div>
+  <div class="row num" style="font-size:14px">Cote ${odd(b.price)} · Mise ${eur(b.stake)} · Avantage ${pct(b.edge)}${b.status!=="open"?" · "+eur(profit(b)):""}</div>
+  <div class="row">${b.status==="open"?`<button class="small" data-s="won" data-id="${b.id}">Gagné</button><button class="small" data-s="lost" data-id="${b.id}">Perdu</button><button class="small" data-s="void" data-id="${b.id}">Annulé</button>`:`<button class="small" data-s="open" data-id="${b.id}">Rouvrir</button>`}<button class="small" data-del="${b.id}">Supprimer</button></div></div>`).join("");
+  L.querySelectorAll("button[data-s]").forEach(x=>x.onclick=()=>{const b=bets.find(b=>b.id===x.dataset.id);b.status=x.dataset.s;store.set("vbt_bets",bets);renderBets()});
+  L.querySelectorAll("button[data-del]").forEach(x=>x.onclick=()=>{
+    if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
+    else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
+}
+function setTab(t){$("view-scan").hidden=t!=="scan";$("view-bets").hidden=t!=="bets";$("tab-scan").setAttribute("aria-selected",t==="scan");$("tab-bets").setAttribute("aria-selected",t==="bets")}
+$("tab-scan").onclick=()=>setTab("scan");$("tab-bets").onclick=()=>setTab("bets");
+$("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=()=>{if($("status").textContent.startsWith("Exemple"))showDemo()};
+showDemo();renderBets();
+</script>
+</body>
+</html>
