@@ -21,6 +21,7 @@
   --clay:#e07a4c; --clay-soft:#3d261a; --good:#5cc187; --good-soft:#1d3326; --bad:#ec7b7b; --bad-soft:#3b1f1f;
   color-scheme:dark}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--f-body);
   padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) calc(84px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
@@ -249,6 +250,7 @@ function showDemo(){render(analyse(demoData(),+$("minedge").value),true);setStat
 function openSheet(b){pending=b;$("sh-title").textContent=b.player+" chez "+b.book;$("sh-odds").value=b.price.toFixed(2);$("sh-stake").value=$("stake").value||5;$("sheet").hidden=false}
 $("sh-cancel").onclick=()=>{$("sheet").hidden=true;pending=null};
 $("sh-ok").onclick=()=>{
+  if(!pending){$("sheet").hidden=true;return}
   const price=parseFloat(String($("sh-odds").value).replace(",",".")),stake=parseFloat(String($("sh-stake").value).replace(",","."));
   if(!(price>1)||!(stake>0)){$("sh-title").textContent="Cote et mise doivent être des nombres positifs.";return}
   bets.unshift({id:Date.now().toString(36),...pending,price,stake,edge:price*pending.p-1,status:"open",at:new Date().toISOString()});
