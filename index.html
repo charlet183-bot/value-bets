@@ -120,6 +120,16 @@ details summary{cursor:pointer;font-weight:600}
     </details>
   </section>
 
+  <section id="view-jeux" class="wrap" style="padding:0" hidden>
+    <div class="panel">
+      <div class="label">Total de jeux et handicaps</div>
+      <p class="note" style="margin:0">Même principe : chaque ligne du bookmaker (ex. « plus de 22,5 jeux ») est comparée à la même ligne chez Pinnacle, marge retirée. Utilise la clé et le seuil de l'onglet Recherche. Coûte 2 crédits par tournoi.</p>
+      <button id="scan-jeux" class="primary">Chercher sur les jeux</button>
+      <div id="status-jeux" class="status">Lance la recherche pour voir les value bets sur le nombre de jeux et les handicaps.</div>
+    </div>
+    <div id="results-jeux" class="wrap" style="padding:0"></div>
+  </section>
+
   <section id="view-bets" class="wrap" style="padding:0" hidden>
     <div class="panel">
       <div class="stats">
@@ -138,6 +148,7 @@ details summary{cursor:pointer;font-weight:600}
 
 <nav class="tabs" role="tablist">
   <button id="tab-scan" role="tab" aria-selected="true">Recherche</button>
+  <button id="tab-jeux" role="tab" aria-selected="false">Jeux</button>
   <button id="tab-bets" role="tab" aria-selected="false">Mes paris</button>
 </nav>
 
@@ -223,8 +234,8 @@ function analyse(events,minEdge){
   return out.sort((a,b)=>b.hits[0].edge-a.hits[0].edge);
 }
 
-function render(list,demo){
-  const r=$("results");
+function render(list,demo,target,cat){
+  const r=$(target||"results");
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun value bet au-dessus du seuil.</b><span class="note">Normal : ils sont rares et partent vite. Réessaie plus tard ou baisse le seuil.</span></div>';return}
   r.innerHTML=list.map((m,i)=>{
     const d=new Date(m.start);
@@ -233,7 +244,7 @@ function render(list,demo){
     <div class="players">${esc(m.players)}</div>
     ${m.hits.map((h,j)=>`<div class="vb"><div class="who"><b>${esc(h.player)}</b><small>${esc(h.book)} · cote <span class="num">${odd(h.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/h.p)}</span> · proba ${pct(h.p)}</div></div>
       <span class="edge">+${pct(h.edge)}</span><button class="small" data-m="${i}" data-h="${j}">Parier</button></div>`).join("")}</div>`}).join("");
-  r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo})});
+  r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo,cat:cat||"value"})});
 }
 
 async function scan(){
@@ -266,6 +277,71 @@ async function scan(){
   }finally{$("scan").disabled=false}
 }
 
+// Jeux : totals (Over/Under) et spreads (handicaps), comparés ligne par ligne à Pinnacle
+const fmtPt=n=>(n>0?"+":n<0?"−":"")+Math.abs(n).toString().replace(".",",");
+function labelOf(mk,o){
+  if(mk==="totals")return (o.name==="Over"?"Plus de ":"Moins de ")+String(o.point).replace(".",",")+" jeux";
+  return o.name+" "+fmtPt(o.point)+" jeux";
+}
+function analyseGames(events,minEdge){
+  const out=[];
+  for(const ev of events){
+    const books=ev.bookmakers||[],sharp=books.find(b=>b.key===SHARP);if(!sharp)continue;
+    const fair={};
+    for(const mk of ["totals","spreads"]){
+      const m=sharp.markets.find(x=>x.key===mk);if(!m)continue;
+      const groups={};
+      for(const o of m.outcomes){if(o.point==null)continue;const g=mk==="totals"?String(o.point):String(Math.abs(o.point));(groups[g]=groups[g]||[]).push(o)}
+      for(const g of Object.values(groups)){
+        if(g.length!==2)continue;
+        const inv=g.map(o=>1/o.price),tot=inv[0]+inv[1];
+        g.forEach((o,i)=>fair[mk+"|"+o.name+"|"+o.point]=inv[i]/tot);
+      }
+    }
+    const best={};
+    for(const b of books){
+      if(!BOOKS[b.key])continue;
+      for(const m of b.markets){
+        if(m.key!=="totals"&&m.key!=="spreads")continue;
+        for(const o of m.outcomes){
+          const k=m.key+"|"+o.name+"|"+o.point,p=fair[k];if(!p)continue;
+          const edge=o.price*p-1;
+          if(edge>=minEdge&&(!best[k]||edge>best[k].edge))best[k]={book:BOOKS[b.key],player:labelOf(m.key,o),price:o.price,p,edge};
+        }
+      }
+    }
+    const hits=Object.values(best).sort((a,b)=>b.edge-a.edge);
+    if(hits.length)out.push({id:ev.id,tour:ev.sport_title,start:ev.commence_time,players:ev.home_team+" – "+ev.away_team,hits});
+  }
+  return out.sort((a,b)=>b.hits[0].edge-a.hits[0].edge);
+}
+async function scanGames(){
+  const key=$("apikey").value.trim(),st=(t,e)=>{$("status-jeux").textContent=t;$("status-jeux").className="status"+(e?" err":"")};
+  if(!key){st("Ajoute d'abord ta clé dans l'onglet Recherche.",true);return}
+  $("scan-jeux").disabled=true;st("Recherche des tournois en cours…");
+  try{
+    const sr=await fetch(`${API}/sports?apiKey=${encodeURIComponent(key)}`);
+    if(sr.status===401)throw new Error("Clé refusée : vérifie-la sur the-odds-api.com.");
+    if(!sr.ok)throw new Error("L'API ne répond pas ("+sr.status+"). Réessaie dans un moment.");
+    const sports=(await sr.json()).filter(s=>s.group==="Tennis"&&s.active&&!s.has_outrights);
+    if(!sports.length){st("Aucun tournoi de tennis actif en ce moment.");render([],false,"results-jeux","jeux");return}
+    const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
+    for(const s of sports){
+      st("Lecture des lignes : "+s.title+"…");
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=totals,spreads&oddsFormat=decimal`);
+      left=r.headers.get("x-requests-remaining")||left;
+      if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
+      if(r.ok)all=all.concat(await r.json());
+    }
+    const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
+    const withLines=all.filter(e=>(e.bookmakers||[]).some(b=>BOOKS[b.key]&&b.markets.length)).length;
+    const res=analyseGames(all,+$("minedge").value);
+    render(res,false,"results-jeux","jeux");
+    st(`${all.length} matchs analysés · ${withLines} avec des lignes chez les books français · ${res.length} avec value · crédits restants : ${left}`);
+  }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
+  finally{$("scan-jeux").disabled=false}
+}
+$("scan-jeux").onclick=scanGames;
 function demoData(){
   const t=h=>new Date(Date.now()+h*3600e3).toISOString();
   const mk=(id,tour,start,a,b,pin,fr)=>({id,sport_title:tour,commence_time:start,home_team:a,away_team:b,bookmakers:[
@@ -311,7 +387,7 @@ function renderBets(){
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
     else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
 }
-const CATS={value:"Value bets",aces:"Aces",feeling:"Feeling",autre:"Autre"};
+const CATS={value:"Value bets",jeux:"Value jeux",aces:"Aces",feeling:"Feeling",autre:"Autre"};
 function renderCats(){
   const box=$("catstats"),rows=[];
   for(const c of Object.keys(CATS)){
@@ -336,8 +412,8 @@ $("m-ok").onclick=()=>{
   bets.unshift({id:Date.now().toString(36),cat:$("m-cat").value,match,player:pick,book:$("m-book").value,price,stake,p:null,edge:null,status:"open",at:new Date().toISOString()});
   store.set("vbt_bets",bets);$("msheet").hidden=true;$("m-match").value="";$("m-pick").value="";$("m-odds").value="";renderBets();
 };
-function setTab(t){$("view-scan").hidden=t!=="scan";$("view-bets").hidden=t!=="bets";$("tab-scan").setAttribute("aria-selected",t==="scan");$("tab-bets").setAttribute("aria-selected",t==="bets")}
-$("tab-scan").onclick=()=>setTab("scan");$("tab-bets").onclick=()=>setTab("bets");
+function setTab(t){for(const k of ["scan","jeux","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
+$("tab-scan").onclick=()=>setTab("scan");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-bets").onclick=()=>setTab("bets");
 $("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=()=>{if($("status").textContent.startsWith("Exemple"))showDemo()};
 showDemo();renderBets();
 </script>
