@@ -70,6 +70,16 @@ button:disabled{opacity:.5;cursor:default}
 .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet .box{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
 .note{font-size:13px;color:var(--muted)}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.duo .field input{width:100%}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.presets button{padding:6px 8px;font-size:12px}
+.prob{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:baseline}
+.prob .big{font:700 34px/1 var(--f-num);color:var(--clay)}
+.dist{display:flex;align-items:flex-end;gap:3px;height:70px}
+.dist div{flex:1;background:var(--line);border-radius:3px 3px 0 0;min-height:2px}
+.dist div.over{background:var(--clay)}
+.distlab{display:flex;justify-content:space-between;font:500 11px/1 var(--f-num);color:var(--muted)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field input,.field select{width:100%}
 .err{color:var(--bad);font-size:14px;min-height:1em}
@@ -130,6 +140,27 @@ details summary{cursor:pointer;font-weight:600}
     <div id="results-jeux" class="wrap" style="padding:0"></div>
   </section>
 
+  <section id="view-comp" class="wrap" style="padding:0" hidden>
+    <div class="panel">
+      <div class="label">Comparer deux serveurs</div>
+      <p class="note" style="margin:0">Entre le % de jeux de service gagnés de chaque joueur (« Service Games Won » sur le <a href="https://www.atptour.com/en/stats/leaderboard?boardType=serve&timeFrame=52week&surface=all&versusRank=all&formerNo1=false" target="_blank" rel="noopener">classement ATP</a>). Repères : gros serveur 88-92 %, moyen 80 %, faible 70-75 %.</p>
+      <div class="duo">
+        <div class="field"><label class="label" for="c-na">Joueur A</label><input id="c-na" type="text" value="Gros serveur"><label class="label" for="c-ha">Service gagné %</label><input id="c-ha" class="num" type="number" inputmode="decimal" value="90" min="40" max="99"></div>
+        <div class="field"><label class="label" for="c-nb">Joueur B</label><input id="c-nb" type="text" value="Serveur moyen"><label class="label" for="c-hb">Service gagné %</label><input id="c-hb" class="num" type="number" inputmode="decimal" value="80" min="40" max="99"></div>
+      </div>
+      <div class="presets"><span class="label" style="align-self:center">Exemples :</span><button data-pa="90" data-pb="89">Gros vs gros</button><button data-pa="90" data-pb="74">Gros vs faible</button><button data-pa="80" data-pb="79">Moyen vs moyen</button></div>
+      <div class="duo">
+        <div class="field"><label class="label" for="c-mk">Pari</label>
+          <select id="c-mk"><option value="set1">Jeux du 1er set</option><option value="match">Jeux du match</option><option value="ga">Jeux gagnés par A</option><option value="gb">Jeux gagnés par B</option></select></div>
+        <div class="field"><label class="label" for="c-ou">Sens</label><select id="c-ou"><option value="over">Plus de</option><option value="under">Moins de</option></select></div>
+        <div class="field"><label class="label" for="c-line">Ligne</label><input id="c-line" class="num" type="number" step="0.5" inputmode="decimal" value="9.5"></div>
+        <div class="field"><label class="label" for="c-odds">Cote du book (option)</label><input id="c-odds" class="num" type="number" step="0.01" inputmode="decimal" placeholder="ex. 1,85"></div>
+      </div>
+      <button id="c-run" class="primary">Calculer</button>
+    </div>
+    <div id="c-out" class="panel"></div>
+  </section>
+
   <section id="view-bets" class="wrap" style="padding:0" hidden>
     <div class="panel">
       <div class="stats">
@@ -149,6 +180,7 @@ details summary{cursor:pointer;font-weight:600}
 <nav class="tabs" role="tablist">
   <button id="tab-scan" role="tab" aria-selected="true">Recherche</button>
   <button id="tab-jeux" role="tab" aria-selected="false">Jeux</button>
+  <button id="tab-comp" role="tab" aria-selected="false">Comparer</button>
   <button id="tab-bets" role="tab" aria-selected="false">Mes paris</button>
 </nav>
 
@@ -342,6 +374,54 @@ async function scanGames(){
   finally{$("scan-jeux").disabled=false}
 }
 $("scan-jeux").onclick=scanGames;
+// Comparateur : simulation Monte-Carlo d'un match en 2 sets gagnants, jeu par jeu
+function simMatch(ha,hb,N){
+  const ptb=Math.min(.8,Math.max(.2,.5+(ha-hb)*1.2)); // chance que A gagne un tie-break
+  const r={set1:[],match:[],ga:[],gb:[]};
+  for(let n=0;n<N;n++){
+    let aServes=Math.random()<.5,setsA=0,setsB=0,totA=0,totB=0,first=null;
+    while(setsA<2&&setsB<2){
+      let a=0,b=0;
+      while(true){
+        if(a===6&&b===6){Math.random()<ptb?a++:b++;aServes=!aServes;break}
+        if(aServes){Math.random()<ha?a++:b++}else{Math.random()<hb?b++:a++}
+        aServes=!aServes;
+        if((a>=6||b>=6)&&Math.abs(a-b)>=2)break;
+      }
+      if(first===null)first=a+b;
+      totA+=a;totB+=b;a>b?setsA++:setsB++;
+    }
+    r.set1.push(first);r.match.push(totA+totB);r.ga.push(totA);r.gb.push(totB);
+  }
+  return r;
+}
+function runComp(){
+  const n=id=>parseFloat(String($(id).value).replace(",","."));
+  const ha=n("c-ha")/100,hb=n("c-hb")/100,line=n("c-line"),odds=n("c-odds"),mk=$("c-mk").value,ou=$("c-ou").value;
+  const out=$("c-out");
+  if(!(ha>.3&&ha<1)||!(hb>.3&&hb<1)){out.innerHTML='<span class="err">Les % de service doivent être entre 30 et 99.</span>';return}
+  if(!(line>0)){out.innerHTML='<span class="err">Indique une ligne, par exemple 9,5.</span>';return}
+  const na=$("c-na").value.trim()||"Joueur A",nb=$("c-nb").value.trim()||"Joueur B";
+  const arr=simMatch(ha,hb,20000)[mk],N=arr.length;
+  const over=arr.filter(x=>x>line).length/N,p=ou==="over"?over:1-over;
+  const mean=arr.reduce((s,x)=>s+x,0)/N;
+  const lo=Math.min(...arr),hi=Math.max(...arr),cnt={};arr.forEach(x=>cnt[x]=(cnt[x]||0)+1);
+  const max=Math.max(...Object.values(cnt));
+  let bars="";for(let x=lo;x<=hi;x++){const c=cnt[x]||0;bars+=`<div class="${(ou==="over"?x>line:x<line)?"over":""}" style="height:${Math.max(3,c/max*100)}%" title="${x} jeux : ${pct(c/N)}"></div>`}
+  const mkLab={set1:"jeux dans le 1er set",match:"jeux dans le match",ga:"jeux gagnés par "+na,gb:"jeux gagnés par "+nb}[mk];
+  const label=(ou==="over"?"Plus de ":"Moins de ")+String(line).replace(".",",")+" "+mkLab;
+  let verdict="";
+  if(odds>1){const edge=odds*p-1;
+    verdict=`<div class="vb"><div class="who"><b>Cote ${odd(odds)} contre cote juste ${odd(1/p)}</b><small>${edge>0?"Le bookmaker paie plus que le modèle ne l'estime.":"Le bookmaker paie moins que le modèle ne l'estime : pas de value."}</small></div><span class="edge" style="color:${edge>0?"var(--good)":"var(--bad)"}">${edge>0?"+":"−"}${pct(Math.abs(edge))}</span>${edge>0?'<button class="small" id="c-bet">Parier</button>':""}</div>`}
+  out.innerHTML=`<div class="label">${esc(na)} (${pct(ha)}) contre ${esc(nb)} (${pct(hb)})</div>
+   <div class="prob"><div><b>${esc(label)}</b><div class="note">Moyenne : ${mean.toFixed(1).replace(".",",")} jeux · cote juste ${odd(1/p)}</div></div><span class="big">${pct(p)}</span></div>
+   <div class="dist">${bars}</div><div class="distlab"><span>${lo} jeux</span><span>${hi} jeux</span></div>
+   ${verdict}
+   <p class="note">Estimation à partir du service uniquement : elle ne voit ni la forme du jour, ni la fatigue, ni un abandon. Même à ${pct(p)}, le pari perd ${pct(1-p)} du temps.</p>`;
+  const bb=$("c-bet");if(bb)bb.onclick=()=>openSheet({match:na+" – "+nb,tour:"Comparateur",start:new Date().toISOString(),player:label,book:"—",price:odds,p,demo:false,cat:"comp"});
+}
+$("c-run").onclick=runComp;
+document.querySelectorAll(".presets button").forEach(b=>b.onclick=()=>{$("c-ha").value=b.dataset.pa;$("c-hb").value=b.dataset.pb;runComp()});
 function demoData(){
   const t=h=>new Date(Date.now()+h*3600e3).toISOString();
   const mk=(id,tour,start,a,b,pin,fr)=>({id,sport_title:tour,commence_time:start,home_team:a,away_team:b,bookmakers:[
@@ -387,7 +467,7 @@ function renderBets(){
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
     else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
 }
-const CATS={value:"Value bets",jeux:"Value jeux",aces:"Aces",feeling:"Feeling",autre:"Autre"};
+const CATS={value:"Value bets",jeux:"Value jeux",comp:"Comparateur",aces:"Aces",feeling:"Feeling",autre:"Autre"};
 function renderCats(){
   const box=$("catstats"),rows=[];
   for(const c of Object.keys(CATS)){
@@ -412,8 +492,8 @@ $("m-ok").onclick=()=>{
   bets.unshift({id:Date.now().toString(36),cat:$("m-cat").value,match,player:pick,book:$("m-book").value,price,stake,p:null,edge:null,status:"open",at:new Date().toISOString()});
   store.set("vbt_bets",bets);$("msheet").hidden=true;$("m-match").value="";$("m-pick").value="";$("m-odds").value="";renderBets();
 };
-function setTab(t){for(const k of ["scan","jeux","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
-$("tab-scan").onclick=()=>setTab("scan");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-bets").onclick=()=>setTab("bets");
+function setTab(t){for(const k of ["scan","jeux","comp","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
+$("tab-scan").onclick=()=>setTab("scan");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
 $("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=()=>{if($("status").textContent.startsWith("Exemple"))showDemo()};
 showDemo();renderBets();
 </script>
