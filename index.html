@@ -70,6 +70,13 @@ button:disabled{opacity:.5;cursor:default}
 .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet .box{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
 .note{font-size:13px;color:var(--muted)}
+.rank{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.rank .n{font:700 26px/1 var(--f-display);color:var(--clay);grid-row:span 3}
+.rank .meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
+.rank .meta b{color:var(--fg);font-family:var(--f-num);font-weight:500}
+.rank .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.meter{display:inline-block;width:46px;height:6px;border-radius:99px;background:var(--line);vertical-align:middle;position:relative;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;background:var(--clay)}
 .duo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .duo .field input{width:100%}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
@@ -134,8 +141,8 @@ details summary{cursor:pointer;font-weight:600}
     <div class="panel">
       <div class="label">Total de jeux et handicaps</div>
       <p class="note" style="margin:0">Même principe : chaque ligne du bookmaker (ex. « plus de 22,5 jeux ») est comparée à la même ligne chez Pinnacle, marge retirée. Utilise la clé et le seuil de l'onglet Recherche. Coûte 2 crédits par tournoi.</p>
-      <button id="scan-jeux" class="primary">Chercher sur les jeux</button>
-      <div id="status-jeux" class="status">Lance la recherche pour voir les value bets sur le nombre de jeux et les handicaps.</div>
+      <div class="row"><button id="rank-jeux" class="primary grow">Classer les matchs (plus de jeux)</button><button id="scan-jeux" class="grow">Value bets jeux</button></div>
+      <div id="status-jeux" class="status">« Classer » trie tous les matchs à venir du plus long au plus court. « Value bets jeux » cherche les cotes trop hautes sur les jeux et handicaps.</div>
     </div>
     <div id="results-jeux" class="wrap" style="padding:0"></div>
   </section>
@@ -422,6 +429,66 @@ function runComp(){
 }
 $("c-run").onclick=runComp;
 document.querySelectorAll(".presets button").forEach(b=>b.onclick=()=>{$("c-ha").value=b.dataset.pa;$("c-hb").value=b.dataset.pb;runComp()});
+// Classement : ligne de jeux Pinnacle (marge retirée) + équilibre du match
+function rankMatches(events){
+  const out=[];
+  for(const ev of events){
+    const books=ev.bookmakers||[],sh=books.find(b=>b.key===SHARP);if(!sh)continue;
+    const h=sh.markets.find(m=>m.key==="h2h"),t=sh.markets.find(m=>m.key==="totals");
+    if(!h||h.outcomes.length!==2||!t)continue;
+    const iv=h.outcomes.map(o=>1/o.price),ti=iv[0]+iv[1],pa=iv[0]/ti;
+    const by={};t.outcomes.forEach(o=>{(by[o.point]=by[o.point]||{})[o.name]=o.price});
+    const lines=Object.entries(by).filter(([,v])=>v.Over&&v.Under).map(([pt,v])=>{const a=1/v.Over,b=1/v.Under;return{pt:+pt,pOver:a/(a+b)}});
+    if(!lines.length)continue;
+    lines.sort((a,b)=>Math.abs(a.pOver-.5)-Math.abs(b.pOver-.5));
+    const L=lines[0],est=L.pt+(L.pOver-.5)*8; // ligne principale ajustée
+    let best=null;
+    for(const b of books){if(!BOOKS[b.key])continue;const m=b.markets.find(x=>x.key==="totals");if(!m)continue;
+      for(const o of m.outcomes){if(o.name!=="Over")continue;const f=lines.find(l=>l.pt===o.point);if(!f)continue;
+        const edge=o.price*f.pOver-1;if(!best||edge>best.edge)best={book:BOOKS[b.key],pt:o.point,price:o.price,p:f.pOver,edge}}}
+    out.push({ev,tour:ev.sport_title,start:ev.commence_time,a:h.outcomes[0].name,b:h.outcomes[1].name,pa,line:L.pt,pOver:L.pOver,est,bal:1-Math.abs(pa-(1-pa)),best});
+  }
+  return out.sort((x,y)=>y.est-x.est);
+}
+function renderRank(list){
+  const r=$("results-jeux");
+  if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec une ligne de jeux pour l\'instant.</b><span class="note">Pinnacle publie souvent les lignes de jeux la veille du match. Réessaie plus tard.</span></div>';return}
+  r.innerHTML=list.map((m,i)=>{const d=new Date(m.start);
+    const when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric"})+" "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+    const fav=m.pa>=.5?[m.a,m.pa]:[m.b,1-m.pa];
+    const bb=m.best?`<span class="note">Meilleur « plus de ${String(m.best.pt).replace(".",",")} » : ${esc(m.best.book)} à <b class="num">${odd(m.best.price)}</b> (${m.best.edge>=0?"+":"−"}${pct(Math.abs(m.best.edge))})</span>`:'<span class="note">Pas encore de ligne chez les books français.</span>';
+    return `<div class="rank"><span class="n">${i+1}</span>
+      <div><div class="mhead"><span>${esc(m.tour)}</span><span>${when}</span></div><div class="players">${esc(m.a)} – ${esc(m.b)}</div></div>
+      <div class="meta"><span>Jeux attendus <b>${m.est.toFixed(1).replace(".",",")}</b></span><span>Ligne <b>${String(m.line).replace(".",",")}</b></span><span>Équilibre <span class="meter"><i style="width:${(m.bal*100).toFixed(0)}%"></i></span> ${esc(fav[0])} ${pct(fav[1])}</span></div>
+      <div class="acts">${bb}${m.best&&m.best.edge>0?`<button class="small" data-r="${i}">Parier</button>`:""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
+  r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux"})});
+  r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";setTab("comp");$("c-out").innerHTML='<span class="note">Entre le % de service gagné des deux joueurs puis appuie sur Calculer.</span>';window.scrollTo(0,0)});
+}
+async function rankGames(){
+  const key=$("apikey").value.trim(),st=(t,e)=>{$("status-jeux").textContent=t;$("status-jeux").className="status"+(e?" err":"")};
+  if(!key){st("Ajoute d'abord ta clé dans l'onglet Recherche.",true);return}
+  $("rank-jeux").disabled=true;st("Recherche des tournois en cours…");
+  try{
+    const sr=await fetch(`${API}/sports?apiKey=${encodeURIComponent(key)}`);
+    if(sr.status===401)throw new Error("Clé refusée : vérifie-la sur the-odds-api.com.");
+    if(!sr.ok)throw new Error("L'API ne répond pas ("+sr.status+"). Réessaie dans un moment.");
+    const sports=(await sr.json()).filter(s=>s.group==="Tennis"&&s.active&&!s.has_outrights);
+    if(!sports.length){st("Aucun tournoi de tennis actif en ce moment.");renderRank([]);return}
+    const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
+    for(const s of sports){
+      st("Lecture des matchs : "+s.title+"…");
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h,totals&oddsFormat=decimal`);
+      left=r.headers.get("x-requests-remaining")||left;
+      if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
+      if(r.ok)all=all.concat(await r.json());
+    }
+    const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
+    const res=rankMatches(all);renderRank(res);
+    st(`${res.length} matchs classés sur ${all.length} à venir (les autres n'ont pas encore de ligne de jeux) · crédits restants : ${left}`);
+  }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
+  finally{$("rank-jeux").disabled=false}
+}
+$("rank-jeux").onclick=rankGames;
 function demoData(){
   const t=h=>new Date(Date.now()+h*3600e3).toISOString();
   const mk=(id,tour,start,a,b,pin,fr)=>({id,sport_title:tour,commence_time:start,home_team:a,away_team:b,bookmakers:[
