@@ -71,7 +71,7 @@ button:disabled{opacity:.5;cursor:default}
 .sheet .box{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
 .note{font-size:13px;color:var(--muted)}
 .rank{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-.rank .n{font:700 26px/1 var(--f-display);color:var(--clay);grid-row:span 3}
+.rank .n{font:700 26px/1 var(--f-display);color:var(--clay);grid-row:span 6;align-self:start}
 .rank .meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
 .rank .meta b{color:var(--fg);font-family:var(--f-num);font-weight:500}
 .rank .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -141,16 +141,18 @@ details summary{cursor:pointer;font-weight:600}
     <div class="panel">
       <div class="label">Total de jeux et handicaps</div>
       <p class="note" style="margin:0">Même principe : chaque ligne du bookmaker (ex. « plus de 22,5 jeux ») est comparée à la même ligne chez Pinnacle, marge retirée. Utilise la clé et le seuil de l'onglet Recherche. Coûte 2 crédits par tournoi.</p>
-      <div class="row"><button id="rank-jeux" class="primary grow">Classer les matchs (plus de jeux)</button><button id="scan-jeux" class="grow">Value bets jeux</button></div>
-      <div id="status-jeux" class="status">« Classer » trie tous les matchs à venir du plus long au plus court. « Value bets jeux » cherche les cotes trop hautes sur les jeux et handicaps.</div>
+      <div class="row"><button id="rank-jeux" class="primary grow">Classer les matchs</button><button id="scan-jeux" class="grow">Value bets jeux</button></div>
+      <div id="status-jeux" class="status">« Classer » analyse seul tous les matchs à venir avec les stats de service récentes des joueurs. « Value bets jeux » cherche les cotes trop hautes sur les jeux et handicaps.</div>
     </div>
+    <div class="row" id="sortrow" hidden><label class="label" for="sortby">Trier par</label>
+      <select id="sortby"><option value="s1">1er set à 10 jeux ou plus</option><option value="est">Jeux du match</option><option value="aces">Aces attendus</option></select></div>
     <div id="results-jeux" class="wrap" style="padding:0"></div>
   </section>
 
   <section id="view-comp" class="wrap" style="padding:0" hidden>
     <div class="panel">
       <div class="label">Comparer deux serveurs</div>
-      <p class="note" style="margin:0">Entre le % de jeux de service gagnés de chaque joueur (« Service Games Won » sur le <a href="https://www.atptour.com/en/stats/leaderboard?boardType=serve&timeFrame=52week&surface=all&versusRank=all&formerNo1=false" target="_blank" rel="noopener">classement ATP</a>). Repères : gros serveur 88-92 %, moyen 80 %, faible 70-75 %.</p>
+      <p class="note" style="margin:0">Tape les noms complets puis « Remplir les % auto », ou entre toi-même le % de jeux de service gagnés de chaque joueur (« Service Games Won » sur le <a href="https://www.atptour.com/en/stats/leaderboard?boardType=serve&timeFrame=52week&surface=all&versusRank=all&formerNo1=false" target="_blank" rel="noopener">classement ATP</a>). Repères : gros serveur 88-92 %, moyen 80 %, faible 70-75 %.</p>
       <div class="duo">
         <div class="field"><label class="label" for="c-na">Joueur A</label><input id="c-na" type="text" value="Gros serveur"><label class="label" for="c-ha">Service gagné %</label><input id="c-ha" class="num" type="number" inputmode="decimal" value="90" min="40" max="99"></div>
         <div class="field"><label class="label" for="c-nb">Joueur B</label><input id="c-nb" type="text" value="Serveur moyen"><label class="label" for="c-hb">Service gagné %</label><input id="c-hb" class="num" type="number" inputmode="decimal" value="80" min="40" max="99"></div>
@@ -163,7 +165,7 @@ details summary{cursor:pointer;font-weight:600}
         <div class="field"><label class="label" for="c-line">Ligne</label><input id="c-line" class="num" type="number" step="0.5" inputmode="decimal" value="9.5"></div>
         <div class="field"><label class="label" for="c-odds">Cote du book (option)</label><input id="c-odds" class="num" type="number" step="0.01" inputmode="decimal" placeholder="ex. 1,85"></div>
       </div>
-      <button id="c-run" class="primary">Calculer</button>
+      <div class="row"><button id="c-auto" class="grow">Remplir les % auto</button><button id="c-run" class="primary grow">Calculer</button></div>
     </div>
     <div id="c-out" class="panel"></div>
   </section>
@@ -230,6 +232,7 @@ details summary{cursor:pointer;font-weight:600}
 const BOOKS={winamax_fr:"Winamax",betclic_fr:"Betclic",unibet_fr:"Unibet",parionssport_fr:"Parions Sport",pmu_fr:"PMU",netbet_fr:"NetBet"};
 const SHARP="pinnacle";
 const API="https://api.the-odds-api.com/v4";
+const STATS="https://sxoaiurkgdetzvgjfsdx.supabase.co/functions/v1/tennis-serve";
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 let bets=store.get("vbt_bets",[]);
@@ -428,7 +431,59 @@ function runComp(){
   const bb=$("c-bet");if(bb)bb.onclick=()=>openSheet({match:na+" – "+nb,tour:"Comparateur",start:new Date().toISOString(),player:label,book:"—",price:odds,p,demo:false,cat:"comp"});
 }
 $("c-run").onclick=runComp;
+$("c-auto").onclick=async()=>{
+  const a=$("c-na").value.trim(),b=$("c-nb").value.trim();
+  $("c-out").innerHTML='<span class="note">Recherche des stats de '+esc(a)+" et "+esc(b)+"…</span>";
+  await fetchStats([a,b]);const A=statCache[a],B=statCache[b];
+  if(A)$("c-ha").value=(A.hold*100).toFixed(1);if(B)$("c-hb").value=(B.hold*100).toFixed(1);
+  const miss=[!A&&a,!B&&b].filter(Boolean);
+  runComp();
+  if(miss.length)$("c-out").insertAdjacentHTML("afterbegin",'<p class="err">Stats introuvables pour '+esc(miss.join(" et "))+". Tape le prénom et le nom complets, par exemple Taylor Fritz.</p>");
+};
 document.querySelectorAll(".presets button").forEach(b=>b.onclick=()=>{$("c-ha").value=b.dataset.pa;$("c-hb").value=b.dataset.pb;runComp()});
+// Modèle exact : distribution des jeux d'un set en partant du % de jeux de service gagnés
+const clampTb=(ha,hb)=>Math.min(.8,Math.max(.2,.5+(ha-hb)*1.2));
+function setDist(ha,hb){
+  const wa=new Array(14).fill(0),wb=new Array(14).fill(0),ptb=clampTb(ha,hb);
+  for(const aStarts of [true,false]){
+    let P={"0,0":.5};
+    for(let k=0;k<=12;k++){
+      const nx={};
+      for(const key in P){
+        const [a,b]=key.split(",").map(Number),pr=P[key];
+        if(a+b!==k)continue;
+        if(a===6&&b===6){wa[13]+=pr*ptb;wb[13]+=pr*(1-ptb);continue}
+        const aSrv=(k%2===0)===aStarts,pa=aSrv?ha:1-hb;
+        for(const [na,nb,q] of [[a+1,b,pa],[a,b+1,1-pa]]){
+          if((na>=6||nb>=6)&&Math.abs(na-nb)>=2){(na>nb?wa:wb)[na+nb]+=pr*q}else{const kk=na+","+nb;nx[kk]=(nx[kk]||0)+pr*q}
+        }
+      }
+      for(const kk in nx)P[kk]=nx[kk];
+    }
+  }
+  return {wa,wb};
+}
+const pOverOf=(dist,L)=>dist.reduce((s,v,g)=>s+(g>L?v:0),0);
+// Stats de service réelles (Tennis Abstract, via le relais Supabase)
+const statCache={};
+async function fetchStats(names){
+  const need=[...new Set(names)].filter(n=>!(n in statCache));
+  for(let i=0;i<need.length;i+=30){
+    const part=need.slice(i,i+30);
+    try{const r=await fetch(STATS+"?players="+encodeURIComponent(part.join(",")));
+      if(r.ok){const j=await r.json();part.forEach(n=>statCache[n]=j.players?j.players[n]||null:null)}}catch(e){}
+  }
+  return statCache;
+}
+function serveView(m){
+  const A=statCache[m.a],B=statCache[m.b];
+  if(!A||!B)return null;
+  const {wa,wb}=setDist(A.hold,B.hold),model=pOverOf(wa.map((v,g)=>v+wb[g]),9.5);
+  const hist=(A.set1Over95!=null&&B.set1Over95!=null)?(A.set1Over95+B.set1Over95)/2:null;
+  const s1=hist==null?model:(model+hist)/2;
+  const sg=m.est/2;
+  return {A,B,model,hist,s1,acesA:A.acesPerServiceGame*sg,acesB:B.acesPerServiceGame*sg};
+}
 // Classement : ligne de jeux Pinnacle (marge retirée) + équilibre du match
 function rankMatches(events){
   const out=[];
@@ -450,19 +505,31 @@ function rankMatches(events){
   }
   return out.sort((x,y)=>y.est-x.est);
 }
+let lastRank=[];
+function sortRank(list){
+  const k=$("sortby").value,v=m=>{const s=m.sv;if(k==="s1")return s?s.s1:-1;if(k==="aces")return s?Math.max(s.acesA,s.acesB):-1;return m.est};
+  return list.slice().sort((x,y)=>v(y)-v(x));
+}
 function renderRank(list){
   const r=$("results-jeux");
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec une ligne de jeux pour l\'instant.</b><span class="note">Pinnacle publie souvent les lignes de jeux la veille du match. Réessaie plus tard.</span></div>';return}
   r.innerHTML=list.map((m,i)=>{const d=new Date(m.start);
     const when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric"})+" "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
-    const fav=m.pa>=.5?[m.a,m.pa]:[m.b,1-m.pa];
+    const fav=m.pa>=.5?[m.a,m.pa]:[m.b,1-m.pa],sv=m.sv,sn=n=>esc(n.split(" ").pop());
+    const svHtml=sv?`<div class="vb"><div class="who"><b>1er set à 10 jeux ou plus</b><small>Modèle ${pct(sv.model)}${sv.hist!=null?" · historique "+pct(sv.hist):""} · cote juste <span class="num">${odd(1/sv.s1)}</span></small></div><span class="edge">${pct(sv.s1)}</span></div>
+      <div class="meta"><span>Service gagné <b>${sn(m.a)} ${pct(sv.A.hold)}</b> · <b>${sn(m.b)} ${pct(sv.B.hold)}</b></span><span>Aces attendus <b>${sn(m.a)} ${sv.acesA.toFixed(1).replace(".",",")}</b> · <b>${sn(m.b)} ${sv.acesB.toFixed(1).replace(".",",")}</b></span></div>`
+      :'<div class="meta"><span>Stats de service introuvables pour au moins un des joueurs.</span></div>';
     const bb=m.best?`<span class="note">Meilleur « plus de ${String(m.best.pt).replace(".",",")} » : ${esc(m.best.book)} à <b class="num">${odd(m.best.price)}</b> (${m.best.edge>=0?"+":"−"}${pct(Math.abs(m.best.edge))})</span>`:'<span class="note">Pas encore de ligne chez les books français.</span>';
     return `<div class="rank"><span class="n">${i+1}</span>
       <div><div class="mhead"><span>${esc(m.tour)}</span><span>${when}</span></div><div class="players">${esc(m.a)} – ${esc(m.b)}</div></div>
+      ${svHtml}
       <div class="meta"><span>Jeux attendus <b>${m.est.toFixed(1).replace(".",",")}</b></span><span>Ligne <b>${String(m.line).replace(".",",")}</b></span><span>Équilibre <span class="meter"><i style="width:${(m.bal*100).toFixed(0)}%"></i></span> ${esc(fav[0])} ${pct(fav[1])}</span></div>
       <div class="acts">${bb}${m.best&&m.best.edge>0?`<button class="small" data-r="${i}">Parier</button>`:""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
   r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux"})});
-  r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";setTab("comp");$("c-out").innerHTML='<span class="note">Entre le % de service gagné des deux joueurs puis appuie sur Calculer.</span>';window.scrollTo(0,0)});
+  r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";
+    if(m.sv){$("c-ha").value=(m.sv.A.hold*100).toFixed(1);$("c-hb").value=(m.sv.B.hold*100).toFixed(1);setTab("comp");runComp()}
+    else{setTab("comp");$("c-out").innerHTML='<span class="note">Entre le % de service gagné des deux joueurs puis appuie sur Calculer.</span>'}
+    window.scrollTo(0,0)});
 }
 async function rankGames(){
   const key=$("apikey").value.trim(),st=(t,e)=>{$("status-jeux").textContent=t;$("status-jeux").className="status"+(e?" err":"")};
@@ -483,12 +550,17 @@ async function rankGames(){
       if(r.ok)all=all.concat(await r.json());
     }
     const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
-    const res=rankMatches(all);renderRank(res);
-    st(`${res.length} matchs classés sur ${all.length} à venir (les autres n'ont pas encore de ligne de jeux) · crédits restants : ${left}`);
+    const res=rankMatches(all);
+    st("Récupération des stats de service des joueurs…");
+    await fetchStats(res.flatMap(m=>[m.a,m.b]));
+    res.forEach(m=>m.sv=serveView(m));
+    lastRank=res;$("sortrow").hidden=false;renderRank(sortRank(res));
+    st(`${res.length} matchs classés sur ${all.length} à venir · stats de service trouvées pour ${res.filter(m=>m.sv).length} · crédits restants : ${left}`);
   }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
   finally{$("rank-jeux").disabled=false}
 }
 $("rank-jeux").onclick=rankGames;
+$("sortby").onchange=()=>{if(lastRank.length)renderRank(sortRank(lastRank))};
 function demoData(){
   const t=h=>new Date(Date.now()+h*3600e3).toISOString();
   const mk=(id,tour,start,a,b,pin,fr)=>({id,sport_title:tour,commence_time:start,home_team:a,away_team:b,bookmakers:[
