@@ -266,6 +266,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
       <div class="duo">
         <div class="field"><label class="label" for="c-mk">Pari</label>
           <select id="c-mk"><option value="set1">Jeux du 1er set</option><option value="match">Jeux du match</option><option value="ga">Jeux gagnés par A</option><option value="gb">Jeux gagnés par B</option></select></div>
+        <div class="field"><label class="label" for="c-bo5">Format</label><select id="c-bo5"><option value="0">2 sets gagnants</option><option value="1">3 sets gagnants (Grand Chelem)</option></select></div>
         <div class="field"><label class="label" for="c-ou">Sens</label><select id="c-ou"><option value="over">Plus de</option><option value="under">Moins de</option></select></div>
         <div class="field"><label class="label" for="c-line">Ligne</label><input id="c-line" class="num" type="number" step="0.5" inputmode="decimal" value="9.5"></div>
         <div class="field"><label class="label" for="c-odds">Cote du book (option)</label><input id="c-odds" class="num" type="number" step="0.01" inputmode="decimal" placeholder="ex. 1,85"></div>
@@ -579,32 +580,40 @@ function simMatch(ha,hb,N){
   }
   return r;
 }
+let compCtx=null; // joueurs dont les stats ont rempli les champs (pour les aces)
 function runComp(){
   const n=id=>parseFloat(String($(id).value).replace(",","."));
-  const ha=n("c-ha")/100,hb=n("c-hb")/100,line=n("c-line"),odds=n("c-odds"),mk=$("c-mk").value,ou=$("c-ou").value;
+  const ha=n("c-ha")/100,hb=n("c-hb")/100,line=n("c-line"),odds=n("c-odds"),mk=$("c-mk").value,ou=$("c-ou").value,bo5=$("c-bo5").value==="1";
   const out=$("c-out");
   if(!(ha>.3&&ha<1)||!(hb>.3&&hb<1)){out.innerHTML='<span class="err">Les % de service doivent être entre 30 et 99.</span>';return}
   if(!(line>0)){out.innerHTML='<span class="err">Indique une ligne, par exemple 9,5.</span>';return}
   const na=$("c-na").value.trim()||"Joueur A",nb=$("c-nb").value.trim()||"Joueur B";
-  const arr=simMatch(ha,hb,20000)[mk],N=arr.length;
-  const over=arr.filter(x=>x>line).length/N,p=ou==="over"?over:1-over;
-  const mean=arr.reduce((s,x)=>s+x,0)/N;
-  const lo=Math.min(...arr),hi=Math.max(...arr),cnt={};arr.forEach(x=>cnt[x]=(cnt[x]||0)+1);
-  const max=Math.max(...Object.values(cnt));
-  let bars="";for(let x=lo;x<=hi;x++){const c=cnt[x]||0;bars+=`<div class="${(ou==="over"?x>line:x<line)?"over":""}" style="height:${Math.max(3,c/max*100)}%" title="${x} jeux : ${pct(c/N)}"></div>`}
+  const surf=compSurf==="all"?null:compSurf;
+  const pa=pFromHold(ha),pb=pFromHold(hb),g=gamesModel(pa,pb,bo5);
+  const dist={set1:g.first,match:g.total,ga:g.gA,gb:g.gB}[mk],kind={set1:"set1",match:"total",ga:"games",gb:"games"}[mk];
+  const over=calOver(kind,overOf(dist,line),bo5,surf),p=ou==="over"?over:1-over;
+  const mean=meanOf(dist),keys=Object.keys(dist).map(Number).filter(k=>dist[k]>.002),lo=Math.min(...keys),hi=Math.max(...keys);
+  const max=Math.max(...keys.map(k=>dist[k]));
+  let bars="";for(let x=lo;x<=hi;x++){const c=dist[x]||0;bars+=`<div class="${(ou==="over"?x>line:x<line)?"over":""}" style="height:${Math.max(3,c/max*100)}%" title="${x} jeux : ${pct(c)}"></div>`}
   const mkLab={set1:"jeux dans le 1er set",match:"jeux dans le match",ga:"jeux gagnés par "+na,gb:"jeux gagnés par "+nb}[mk];
   const label=(ou==="over"?"Plus de ":"Moins de ")+String(line).replace(".",",")+" "+mkLab;
   let verdict="";
   if(odds>1){const edge=odds*p-1;
-    verdict=`<div class="vb"><div class="who"><b>Cote ${odd(odds)} contre cote juste ${odd(1/p)}</b><small>${edge>0?"Le bookmaker paie plus que le modèle ne l'estime.":"Le bookmaker paie moins que le modèle ne l'estime : pas de value."}</small></div><span class="edge" style="color:${edge>0?"var(--good)":"var(--bad)"}">${edge>0?"+":"−"}${pct(Math.abs(edge))}</span>${edge>0?'<button class="small" id="c-bet">Parier</button>':""}</div>`}
+    verdict=`<div class="vb"><div class="who"><b>Cote ${odd(odds)} contre cote juste ${odd(1/p)}</b><small>${edge>0?"Le bookmaker paie plus que le modèle ne l'estime.":"Le bookmaker paie moins que le modèle ne l'estime : pas de value."}</small></div><span class="edge" style="color:${edge>0?"var(--good)":"var(--bad)"}">${edge>0?"+":"−"}${pct(Math.abs(edge))}</span>${selBtn({sid:"comp|"+na+"|"+nb+"|"+label,mid:"comp|"+na+"|"+nb,label,short:"Coupon",match:na+" – "+nb,tour:"Comparateur",start:new Date().toISOString(),book:BOOKS[myBooks[0]]||"Winamax",price:odds,p,cat:"comp",value:edge>0})}</div>`}
+  // aces, si les stats des joueurs sont connues
+  let aces="";const A=compCtx&&statCache[compCtx.a],B=compCtx&&statCache[compCtx.b];
+  if(A&&B&&compCtx.a===$("c-na").value.trim()&&compCtx.b===$("c-nb").value.trim()){
+    const rA=blendStat(A,surf,"rpw"),rB=blendStat(B,surf,"rpw"),E=meanOf(g.total);
+    const xa=acesExpected(A,rB,pa,E,surf,bo5),xb=acesExpected(B,rA,pb,E,surf,bo5);
+    if(xa!=null&&xb!=null)aces=`<div class="meta"><span>Aces attendus <b>${esc(na.split(" ").pop())} ${xa.toFixed(1).replace(".",",")}</b> · <b>${esc(nb.split(" ").pop())} ${xb.toFixed(1).replace(".",",")}</b></span></div>`;
+  }
   out.innerHTML=`<div class="label">${esc(na)} (${pct(ha)}) contre ${esc(nb)} (${pct(hb)})</div>
-   <div class="prob"><div><b>${esc(label)}</b><div class="note">Moyenne : ${mean.toFixed(1).replace(".",",")} jeux · cote juste ${odd(1/p)}</div></div><span class="big">${pct(p)}</span></div>
+   <div class="prob"><div><b>${esc(label)}</b><div class="note">Moyenne brute du modèle : ${mean.toFixed(1).replace(".",",")} jeux · cote juste ${odd(1/p)}</div></div><span class="big">${pct(p)}</span></div>
    <div class="dist">${bars}</div><div class="distlab"><span>${lo} jeux</span><span>${hi} jeux</span></div>
-   ${verdict}
-   <p class="note">Estimation à partir du service uniquement : elle ne voit ni la forme du jour, ni la fatigue, ni un abandon. Même à ${pct(p)}, le pari perd ${pct(1-p)} du temps.</p>`;
-  const bb=$("c-bet");if(bb)bb.onclick=()=>openSheet({match:na+" – "+nb,tour:"Comparateur",start:new Date().toISOString(),player:label,book:"—",price:odds,p,demo:false,cat:"comp"});
+   ${aces}${verdict}
+   <p class="note">Calcul exact point par point, puis corrigé d'après 42 000 matchs ATP (le modèle brut surestime le total d'environ 1 jeu). Il ne voit ni la forme du jour ni un abandon. Même à ${pct(p)}, le pari perd ${pct(1-p)} du temps.</p>`;
 }
-$("c-run").onclick=runComp;
+$("c-run").onclick=runComp;$("c-bo5").onchange=runComp;
 // Surfaces : dur, terre battue, gazon (noms Tennis Abstract : Hard, Clay, Grass)
 const SURF={Hard:"dur",Clay:"terre battue",Grass:"gazon"};
 const MIN_SURF=3;
@@ -623,18 +632,20 @@ function holdOn(P,sf){
   return{hold:P.hold,n:g?g.n:0,surf:false};
 }
 async function compAuto(){
-  const a=$("c-na").value.trim(),b=$("c-nb").value.trim(),sf=compSurf;
+  const a=$("c-na").value.trim(),b=$("c-nb").value.trim(),sf=compSurf,surf=sf==="all"?null:sf;
   $("c-out").innerHTML='<span class="note">Recherche des stats de '+esc(a)+" et "+esc(b)+"…</span>";
   for(const n of [a,b])if(isOld(statCache[n]))delete statCache[n];
   await fetchStats([a,b]);const A=statCache[a],B=statCache[b];
-  const ha=A&&holdOn(A,sf),hb=B&&holdOn(B,sf);
-  if(ha)$("c-ha").value=(ha.hold*100).toFixed(1);if(hb)$("c-hb").value=(hb.hold*100).toFixed(1);
+  const pts=A&&B?pointProbs(A,B,surf,false):null;
+  if(pts){$("c-ha").value=(holdP(pts.pa)*100).toFixed(1);$("c-hb").value=(holdP(pts.pb)*100).toFixed(1);compCtx={a,b,surf}}
+  else{const ha=A&&holdOn(A,sf),hb=B&&holdOn(B,sf);if(ha)$("c-ha").value=(ha.hold*100).toFixed(1);if(hb)$("c-hb").value=(hb.hold*100).toFixed(1);compCtx=null}
   const miss=[!A&&a,!B&&b].filter(Boolean);
   runComp();
   if(miss.length)$("c-out").insertAdjacentHTML("afterbegin",'<p class="err">Stats introuvables pour '+esc(miss.join(" et "))+". Tape le prénom et le nom complets, par exemple Taylor Fritz.</p>");
-  if(sf!=="all"){
-    const line=[[a,ha],[b,hb]].filter(([,h])=>h).map(([n,h])=>h.surf?`${esc(n)} : ${h.n} matchs sur ${SURF[sf]}`:`${esc(n)} : ${h.n} match${h.n>1?"s":""} sur ${SURF[sf]}, pas assez, stats toutes surfaces utilisées`).join(" · ");
-    if(line)$("c-out").insertAdjacentHTML("afterbegin",`<p class="note" style="margin:0">${line}</p>`);
+  if(pts)$("c-out").insertAdjacentHTML("afterbegin",`<p class="note" style="margin:0">% de jeux de service gagnés face à CET adversaire (son retour compte)${surf?`, sur ${SURF[surf]}`:""}.</p>`);
+  if(sf!=="all"&&A&&B){
+    const line=[[a,A],[b,B]].map(([n,P])=>{const g=P.surf&&P.surf[sf],k=g?g.n:0;return k>=MIN_SURF?`${esc(n)} : ${k} matchs sur ${SURF[sf]}`:`${esc(n)} : ${k} match${k>1?"s":""} sur ${SURF[sf]}, pas assez, stats toutes surfaces utilisées`}).join(" · ");
+    $("c-out").insertAdjacentHTML("afterbegin",`<p class="note" style="margin:0">${line}</p>`);
   }
 }
 function pickCompSurf(k){compSurf=k;store.set("vbt_csurf",k);surfButtons("c-surf",compSurf,false,pickCompSurf);
@@ -665,6 +676,63 @@ function setDist(ha,hb){
   return {wa,wb};
 }
 const pOverOf=(dist,L)=>dist.reduce((s,v,g)=>s+(g>L?v:0),0);
+// ===== Jeux et aces : modèle point par point (service de A face au retour de B) + correction apprise
+// sur 42 000 matchs ATP 2008-2026, testée sur 2024-2026 (voir model/eval_games.py).
+const GCAL={"set1": {"intercept": -0.0084, "lp": 0.6759, "bo5": -0.0866, "clay": -0.0023, "grass": 0.1112}, "total": {"intercept": -0.3443, "lp": 0.667, "bo5": -0.1184, "clay": 0.0623, "grass": 0.0842}, "games": {"intercept": -0.213, "lp": 0.851, "bo5": -0.1834, "clay": 0.0876, "grass": 0.0905}};
+const ACECAL=[0.0062, -0.3236, 0.0072]; // multiplicateur, retour adverse (par 10 pts de %), 5 sets
+const L01=p=>{p=Math.min(.99,Math.max(.01,p));return Math.log(p/(1-p))};
+function calOver(kind,p,bo5,surf){const c=GCAL[kind];return unlogit(c.intercept+c.lp*L01(p)+c.bo5*(bo5?1:0)+c.clay*(surf==="Clay"?1:0)+c.grass*(surf==="Grass"?1:0))}
+// Set : distribution exacte des scores (jeux A, jeux B) ; ha/hb = chance de garder son service, ptb = chance de A au tie-break
+function setGames(ha,hb,ptb,aStarts){
+  let P={"0,0":1};const out={};
+  for(let k=0;k<13;k++){const nx={};
+    for(const key in P){const [a,b]=key.split(",").map(Number),pr=P[key];
+      if(a===6&&b===6){out["7,6"]=(out["7,6"]||0)+pr*ptb;out["6,7"]=(out["6,7"]||0)+pr*(1-ptb);continue}
+      const ph=((k%2===0)===aStarts)?ha:1-hb;
+      for(const [na,nb,q] of [[a+1,b,ph],[a,b+1,1-ph]]){const kk=na+","+nb;
+        if((na>=6||nb>=6)&&Math.abs(na-nb)>=2)out[kk]=(out[kk]||0)+pr*q;else nx[kk]=(nx[kk]||0)+pr*q}}
+    P=nx;if(!Object.keys(P).length)break}
+  return out;
+}
+const _gm={};
+// Match complet : jeux du 1er set, total, jeux de A, jeux de B (en suivant qui sert au début de chaque set)
+function gamesModel(pa,pb,bo5){
+  const key=[pa.toFixed(3),pb.toFixed(3),bo5?1:0].join("|");if(_gm[key])return _gm[key];
+  const ha=holdP(pa),hb=holdP(pb),ptb=tbP(pa,pb),need=bo5?3:2;
+  const sd={true:setGames(ha,hb,ptb,true),false:setGames(ha,hb,ptb,false)};
+  const add=(o,k,v)=>{o[k]=(o[k]||0)+v};
+  const first={},total={},gA={},gB={};
+  for(const st of [true,false])for(const k in sd[st]){const [a,b]=k.split(",").map(Number);add(first,a+b,sd[st][k]/2)}
+  let states={"0|0|1|0|0":.5,"0|0|0|0|0":.5};
+  while(Object.keys(states).length){const nx={};
+    for(const sk in states){const [sa,sb,st,ga,gb]=sk.split("|").map(Number),pr=states[sk];
+      const dist=sd[st===1];
+      for(const k in dist){const [a,b]=k.split(",").map(Number),p=pr*dist[k];
+        const nsa=sa+(a>b?1:0),nsb=sb+(b>a?1:0),nst=(a+b)%2===0?st:1-st,A2=ga+a,B2=gb+b;
+        if(nsa===need||nsb===need){add(total,A2+B2,p);add(gA,A2,p);add(gB,B2,p)}else add(nx,[nsa,nsb,nst,A2,B2].join("|"),p)}}
+    states=nx}
+  return(_gm[key]={first,total,gA,gB,ha,hb,ptb});
+}
+const overOf=(dist,L)=>Object.entries(dist).reduce((t,[g,p])=>t+(+g>L?p:0),0);
+const meanOf=dist=>Object.entries(dist).reduce((t,[g,p])=>t+g*p,0);
+// Chance de gagner un point au service à partir du % de jeux de service gagnés (inverse de holdP)
+function pFromHold(h){let lo=.3,hi=.95;for(let i=0;i<40;i++){const mid=(lo+hi)/2;if(holdP(mid)<h)lo=mid;else hi=mid}return(lo+hi)/2}
+// Service de A face au retour de B (stats corrigées selon les adversaires, mélangées vers la surface)
+function pointProbs(A,B,surf,wta){
+  const avgS=wta?.56:.64,sA=blendStat(A,surf,"spw"),sB=blendStat(B,surf,"spw");if(sA==null||sB==null)return null;
+  const rA=blendStat(A,surf,"rpw")??(1-avgS),rB=blendStat(B,surf,"rpw")??(1-avgS),cl=x=>Math.min(.85,Math.max(.35,x));
+  return{pa:cl(sA-rB+(1-avgS)),pb:cl(sB-rA+(1-avgS)),rA,rB};
+}
+// Nombre moyen de points dans un jeu de service
+function ppg(p){const q=1-p,C={4:1,5:4,6:10};let e=0;for(const n of [4,5,6])e+=n*C[n]*(p**4*q**(n-4)+q**4*p**(n-4));return e+20*p**3*q**3*(6+2/(p*p+q*q))}
+// Aces attendus : taux d'aces (surface) × points servis attendus × correction (retour de l'adversaire, 5 sets)
+function acesExpected(P,oppRpw,pa,Etot,surf,bo5){
+  let rate=P.acePct;if(rate==null)return null;
+  const g=surf&&P.surf&&P.surf[surf];
+  if(g&&g.n>=MIN_SURF&&g.acesPerServiceGame!=null)rate=(g.n*g.acesPerServiceGame/6.3+6*rate)/(g.n+6);
+  return rate*(Etot/2)*ppg(pa)*Math.exp(ACECAL[0]+ACECAL[1]*((oppRpw??.36)-.36)*10+ACECAL[2]*(bo5?1:0));
+}
+
 // Stats de service réelles (Tennis Abstract, via le relais Supabase)
 const statCache={};
 const h2hCache={};
@@ -688,11 +756,12 @@ async function fetchStats(names,pairs){
 function serveView(m){
   const A=statCache[m.a],B=statCache[m.b];
   if(!A||!B)return null;
-  const {wa,wb}=setDist(A.hold,B.hold),model=pOverOf(wa.map((v,g)=>v+wb[g]),9.5);
-  const hist=(A.set1Over95!=null&&B.set1Over95!=null)?(A.set1Over95+B.set1Over95)/2:null;
-  const s1=hist==null?model:(model+hist)/2;
-  const sg=m.est/2;
-  return {A,B,model,hist,s1,acesA:A.acesPerServiceGame*sg,acesB:B.acesPerServiceGame*sg};
+  const wta=/WTA/i.test(m.tour),bo5=!wta&&/australian open|french open|roland|wimbledon|us open/i.test(m.tour||"");
+  const surf=A.lastSurface&&A.lastSurface===B.lastSurface?A.lastSurface:(A.lastSurface||B.lastSurface||null);
+  const pts=pointProbs(A,B,surf,wta);if(!pts)return null;
+  const g=gamesModel(pts.pa,pts.pb,bo5),raw=overOf(g.first,9.5),E=meanOf(g.total);
+  return {A,B,model:raw,hist:null,s1:calOver("set1",raw,bo5,surf),ha:g.ha,hb:g.hb,pa:pts.pa,pb:pts.pb,
+    acesA:acesExpected(A,pts.rB,pts.pa,E,surf,bo5)??0,acesB:acesExpected(B,pts.rA,pts.pb,E,surf,bo5)??0};
 }
 // Classement : ligne de jeux Pinnacle (marge retirée) + équilibre du match
 function rankMatches(events){
@@ -726,8 +795,8 @@ function renderRank(list){
   r.innerHTML=list.map((m,i)=>{const d=new Date(m.start);
     const when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric"})+" "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
     const fav=m.pa>=.5?[m.a,m.pa]:[m.b,1-m.pa],sv=m.sv,sn=n=>esc(n.split(" ").pop());
-    const svHtml=sv?`<div class="vb"><div class="who"><b>1er set à 10 jeux ou plus</b><small>Modèle ${pct(sv.model)}${sv.hist!=null?" · historique "+pct(sv.hist):""} · cote juste <span class="num">${odd(1/sv.s1)}</span></small></div><span class="edge">${pct(sv.s1)}</span></div>
-      <div class="meta"><span>Service gagné <b>${sn(m.a)} ${pct(sv.A.hold)}</b> · <b>${sn(m.b)} ${pct(sv.B.hold)}</b></span><span>Aces attendus <b>${sn(m.a)} ${sv.acesA.toFixed(1).replace(".",",")}</b> · <b>${sn(m.b)} ${sv.acesB.toFixed(1).replace(".",",")}</b></span></div>`
+    const svHtml=sv?`<div class="vb"><div class="who"><b>1er set à 10 jeux ou plus</b><small>Modèle point par point corrigé sur 42 000 matchs · cote juste <span class="num">${odd(1/sv.s1)}</span></small></div><span class="edge">${pct(sv.s1)}</span></div>
+      <div class="meta"><span>Service gagné face à l'adversaire <b>${sn(m.a)} ${pct(sv.ha)}</b> · <b>${sn(m.b)} ${pct(sv.hb)}</b></span><span>Aces attendus <b>${sn(m.a)} ${sv.acesA.toFixed(1).replace(".",",")}</b> · <b>${sn(m.b)} ${sv.acesB.toFixed(1).replace(".",",")}</b></span></div>`
       :'<div class="meta"><span>Stats de service introuvables pour au moins un des joueurs.</span></div>';
     const bb=m.best?`<span class="note">Meilleur « plus de ${String(m.best.pt).replace(".",",")} » : ${esc(m.best.book)} à <b class="num">${odd(m.best.price)}</b> (${m.best.edge>=0?"+":"−"}${pct(Math.abs(m.best.edge))})</span>`:'<span class="note">Pas encore de ligne chez les books français.</span>';
     return `<div class="rank"><span class="n">${i+1}</span>
@@ -737,7 +806,7 @@ function renderRank(list){
       <div class="acts">${bb}${m.best?selBtn({sid:m.ev.id+"|Plus de "+m.best.pt+" jeux|"+m.best.book,mid:m.ev.id,label:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",short:"+"+String(m.best.pt).replace(".",","),match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:m.best.book,price:m.best.price,p:m.best.p,link:m.best.link,copy:surname(m.a),cat:"jeux"}):""}${m.best?goHtml(m.best.book,m.best.link,surname(m.a)):""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
   r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux",link:m.best.link,copy:surname(m.a)})});
   r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";
-    if(m.sv){$("c-ha").value=(m.sv.A.hold*100).toFixed(1);$("c-hb").value=(m.sv.B.hold*100).toFixed(1);setTab("comp");runComp()}
+    if(m.sv){$("c-ha").value=(m.sv.ha*100).toFixed(1);$("c-hb").value=(m.sv.hb*100).toFixed(1);compCtx={a:m.a,b:m.b,surf:null};setTab("comp");runComp()}
     else{setTab("comp");$("c-out").innerHTML='<span class="note">Entre le % de service gagné des deux joueurs puis appuie sur Calculer.</span>'}
     window.scrollTo(0,0)});
 }
