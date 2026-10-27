@@ -3,6 +3,8 @@
 //   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
 // v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
 //      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
+// v6 : lit aussi les autres tableaux de la page Tennis Abstract : bilans sur 52 semaines (surface, niveau,
+//      contre gauchers/droitiers), face-à-face de toute la carrière, vitesse de service (mph).
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -123,6 +125,63 @@ function parse(js: string, surname: string) {
   return out;
 }
 
+// ---------- Autres tableaux de la page joueur (repérés par leur id)
+function table(js: string, id: string) {
+  const t = js.replace(/\\"/g, '"');
+  const i = t.indexOf(`id="${id}"`);
+  if (i < 0) return null;
+  const end = t.indexOf("</table>", i);
+  const chunk = t.slice(i, end < 0 ? undefined : end);
+  const clean = (h: string) => h.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  const head = [...(chunk.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] || "").matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((m) => clean(m[1]));
+  const body = chunk.slice(chunk.indexOf("<tbody>"));
+  const rows = body.split(/<tr[^>]*>/).slice(1).map((r) => [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => clean(m[1]))).filter((r) => r.length);
+  return { head, rows };
+}
+const num = (s: string | undefined) => { const v = parseFloat((s || "").replace("%", "")); return isFinite(v) ? v : null; };
+const wl = (s: string | undefined) => { const m = (s || "").match(/^(\d+)-(\d+)$/); return m ? [+m[1], +m[2]] : null; };
+
+// Bilans sur 52 semaines : une ligne par split (Hard, Clay, Grass, Grand Slams, Masters, vs Lefties…)
+function splits52(js: string) {
+  const t = table(js, "last52-splits");
+  if (!t) return null;
+  const col = (name: string) => t.head.indexOf(name);
+  const out: Record<string, Record<string, number | null>> = {};
+  for (const r of t.rows) {
+    const g = (name: string) => { const i = col(name); return i < 0 ? undefined : r[i]; };
+    const pct = (name: string) => { const v = num(g(name)); return v === null ? null : v / 100; };
+    const tb = wl(g("TB W-L"));
+    out[r[0]] = {
+      m: num(g("M")), w: num(g("W")), l: num(g("L")), tbW: tb ? tb[0] : null, tbN: tb ? tb[0] + tb[1] : null,
+      hold: pct("Hld%"), brk: pct("Brk%"), ace: pct("A%"), df: pct("DF%"), firstIn: pct("1stIn"),
+      firstWon: pct("1st%"), secondWon: pct("2nd%"), spw: pct("SPW"), rpw: pct("RPW"),
+    };
+  }
+  return out;
+}
+// Face-à-face de toute la carrière : adversaire -> victoires, défaites, tie-breaks, dates
+function careerH2h(js: string) {
+  const t = table(js, "head-to-heads");
+  if (!t) return {};
+  const out: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> = {};
+  for (const r of t.rows) {
+    const name = (r[1] || "").replace(/\[[^\]]*\]/g, "").trim();
+    if (!name) continue;
+    out[norm(name)] = { w: num(r[2]) || 0, l: num(r[3]) || 0, tbW: num(r[6]), tbN: num(r[5]), first: r[9] || "", last: r[10] || "" };
+  }
+  return out;
+}
+// Vitesse de service (mph) : moyenne des matchs mesurés les plus récents
+function serveSpeed(js: string) {
+  const t = table(js, "serve-speed");
+  if (!t || !t.rows.length) return null;
+  const col = (name: string) => t.head.indexOf(name);
+  const rows = t.rows.slice(0, 12);
+  const av = (name: string) => { const i = col(name); const v = rows.map((r) => num(r[i])).filter((x): x is number => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const mx = (name: string) => { const i = col(name); const v = rows.map((r) => num(r[i])).filter((x): x is number => x !== null); return v.length ? Math.max(...v) : null; };
+  return { n: rows.length, avg: av("Avg Speed"), first: av("1st Avg"), second: av("2nd Avg"), max: mx("Max 1st"), latest: rows[0][0] || null, oldest: rows[rows.length - 1][0] || null };
+}
+
 // ---------- Elo (Tennis Abstract publie une page par circuit)
 type Elo = { tour: string; elo: number | null; hElo: number | null; cElo: number | null; gElo: number | null; eloRank: number | null; age: number | null };
 let eloCache: { at: number; map: Map<string, Elo> } | null = null;
@@ -175,13 +234,13 @@ async function bio(key: string, tour: string) {
 }
 
 // ---------- Joueur
-const cache = new Map<string, { at: number; data: unknown; rows: M[] }>();
+const cache = new Map<string, { at: number; data: unknown; rows: M[]; h2h: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> }>();
 async function player(name: string) {
   const key = slug(name);
   if (!key || key.length > 60) return null;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit;
-  let data: unknown = null, all: M[] = [];
+  let data: unknown = null, all: M[] = [], h2hMap: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> = {};
   try {
     const eloMap = await elos();
     const elo = eloMap.get(norm(name)) || null;
@@ -191,7 +250,11 @@ async function player(name: string) {
     ]);
     if (r.ok) {
       const surname = strip(name.trim().split(/\s+/).pop() || "");
-      all = parse(await r.text(), surname);
+      const js = await r.text();
+      all = parse(js, surname);
+      const sp52 = splits52(js);
+      h2hMap = careerH2h(js);
+      const speed = serveSpeed(js);
       const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
       const s60 = all.slice(0, 60); // surface, mental, service, niveaux : 60 derniers
       if (ms.length >= 3) {
@@ -220,6 +283,22 @@ async function player(name: string) {
             rpwAdj: avg(g.filter((m) => m.rpw !== null).map((m) => (m.rpw as number) - oppAdj(oR(m)))),
             wins: gr.filter(Boolean).length, known: gr.length,
           };
+        }
+
+        // Bilans 52 semaines par surface (tous les matchs de l'année) : remplacent le calcul sur les derniers matchs
+        if (sp52) {
+          const offS = spwAdj - spw, offR = rpwAdj !== null ? rpwAdj - (avg(nums(ms.map((m) => m.rpw))) ?? rpwAdj) : 0;
+          for (const sname of ["Hard", "Clay", "Grass"]) {
+            const x = sp52[sname];
+            if (!x || !x.m || x.m < 3 || x.spw === null) continue;
+            const prev = surf[sname] || {};
+            surf[sname] = {
+              ...prev, n: x.m, spw: x.spw, hold: x.hold ?? holdFromPoint(x.spw), rpw: x.rpw,
+              spwAdj: x.spw + offS, rpwAdj: x.rpw !== null ? x.rpw + offR : prev.rpwAdj ?? null,
+              acesPerServiceGame: x.ace !== null ? x.ace * 6.3 : prev.acesPerServiceGame ?? null,
+              wins: x.w, known: x.m, tbW: x.tbW, tbN: x.tbN, src: "52 semaines",
+            };
+          }
         }
 
         // Qualité des résultats : victoires pondérées par le classement de l'adversaire
@@ -269,6 +348,12 @@ async function player(name: string) {
           if (si.decider) { decN++; if (m.win) decW++; }
           if (si.firstLost) { cbN++; if (m.win) cbW++; }
         }
+        // tie-breaks : bilan 52 semaines (toutes surfaces) s'il est plus fourni
+        if (sp52) {
+          const t = ["Hard", "Clay", "Grass"].map((k) => sp52[k]).filter((x) => x && x.tbN !== null);
+          const n52 = t.reduce((a, x) => a + (x!.tbN as number), 0);
+          if (n52 > tbN) { tbN = n52; tbW = t.reduce((a, x) => a + (x!.tbW as number), 0); }
+        }
         const clutch = { bpSaved: bps, bpFaced: bpf, tbW, tbN, decW, decN, comebackW: cbW, comebackN: cbN };
 
         // Détail du service
@@ -280,6 +365,19 @@ async function player(name: string) {
         // Résultats par niveau de tournoi
         const levels: Record<string, { w: number; n: number }> = { top: { w: 0, n: 0 }, tour: { w: 0, n: 0 }, low: { w: 0, n: 0 } };
         for (const m of s60) if (m.win !== null) { levels[m.lvl].n++; if (m.win) levels[m.lvl].w++; }
+        if (sp52) { // 52 semaines : plus de matchs
+          const add = (k: string, keys: string[]) => {
+            const xs = keys.map((x) => sp52[x]).filter((x) => x && x.m);
+            const n = xs.reduce((a, x) => a + (x!.m as number), 0);
+            if (n > levels[k].n) levels[k] = { w: xs.reduce((a, x) => a + (x!.w as number), 0), n };
+          };
+          add("top", ["Grand Slams", "Masters"]); add("tour", ["Other Tours"]); add("low", ["Challengers", "ITFs"]);
+        }
+        const hands = sp52 ? {
+          vsLefty: sp52["vs Lefties"] ? { w: sp52["vs Lefties"].w, n: sp52["vs Lefties"].m } : null,
+          vsRighty: sp52["vs Righties"] ? { w: sp52["vs Righties"].w, n: sp52["vs Righties"].m } : null,
+          vsTop10: sp52["vs Top 10"] ? { w: sp52["vs Top 10"].w, n: sp52["vs Top 10"].m } : null,
+        } : null;
 
         data = {
           matches: ms.length, lastDate: ms[0].date, lastSurface: ms[0].surface || null,
@@ -288,7 +386,7 @@ async function player(name: string) {
           wins: res.filter(Boolean).length, results: res.length,
           winRate: res.length >= 5 ? res.filter(Boolean).length / res.length : null,
           form: ms.slice(0, 5).map((m) => (m.win === true ? "V" : m.win === false ? "D" : "?")).join(""),
-          surf, fatigue, clutch, serve, levels,
+          surf, fatigue, clutch, serve, levels, hands, speed,
           elo, bio: b,
           set1Over95: s1.length ? s1.filter((m) => (m.set1 as number) >= 10).length / s1.length : null,
           set1Sample: s1.length,
@@ -296,7 +394,7 @@ async function player(name: string) {
       }
     }
   } catch (_) { data = null; }
-  const entry = { at: Date.now(), data, rows: all };
+  const entry = { at: Date.now(), data, rows: all, h2h: h2hMap };
   cache.set(key, entry);
   return entry;
 }
@@ -329,20 +427,26 @@ Deno.serve(async (req) => {
   }
   const res: Record<string, unknown> = {};
   const rows: Record<string, M[]> = {};
+  const careers: Record<string, Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }>> = {};
   await elos();
   for (let i = 0; i < names.length; i += 8) {
     const part = names.slice(i, i + 8);
     const got = await Promise.all(part.map(player));
-    part.forEach((n, j) => { res[n] = got[j] ? got[j]!.data : null; rows[n] = got[j] ? got[j]!.rows : []; });
+    part.forEach((n, j) => { res[n] = got[j] ? got[j]!.data : null; rows[n] = got[j] ? got[j]!.rows : []; careers[n] = got[j] ? got[j]!.h2h : {}; });
   }
   const h2h: Record<string, unknown> = {};
   for (const pair of (url.searchParams.get("h2h") || "").split(";").slice(0, 60)) {
     const [a, b] = pair.split("|").map((s) => s && s.trim());
     if (!a || !b) continue;
-    if (rows[a] && rows[a].length) h2h[a + "|" + b] = h2hFrom(rows[a], b);
-    else if (rows[b] && rows[b].length) h2h[a + "|" + b] = flip(h2hFrom(rows[b], a));
+    const recent = rows[a] && rows[a].length ? h2hFrom(rows[a], b) : rows[b] && rows[b].length ? flip(h2hFrom(rows[b], a)) : null;
+    const ca = careers[a] && careers[a][norm(b)], cb = careers[b] && careers[b][norm(a)];
+    if (ca || cb) {
+      // carrière complète ; détail par surface et dernier match d'après les résultats récents
+      const c = ca ? { a: ca.w, b: ca.l, tbA: ca.tbW, tbN: ca.tbN, first: ca.first, last: ca.last } : { a: cb!.l, b: cb!.w, tbA: cb!.tbN !== null && cb!.tbW !== null ? cb!.tbN - cb!.tbW : null, tbN: cb!.tbN, first: cb!.first, last: cb!.last };
+      h2h[a + "|" + b] = { a: c.a, b: c.b, n: c.a + c.b, career: true, tbA: c.tbA, tbN: c.tbN, first: c.first, lastDate: c.last, surf: recent ? recent.surf : {}, last: recent ? recent.last : null };
+    } else if (recent) h2h[a + "|" + b] = recent;
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 5, players: res, h2h }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 6, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });

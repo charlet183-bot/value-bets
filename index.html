@@ -605,7 +605,9 @@ function runComp(){
   if(A&&B&&compCtx.a===$("c-na").value.trim()&&compCtx.b===$("c-nb").value.trim()){
     const rA=blendStat(A,surf,"rpw"),rB=blendStat(B,surf,"rpw"),E=meanOf(g.total);
     const xa=acesExpected(A,rB,pa,E,surf,bo5),xb=acesExpected(B,rA,pb,E,surf,bo5);
-    if(xa!=null&&xb!=null)aces=`<div class="meta"><span>Aces attendus <b>${esc(na.split(" ").pop())} ${xa.toFixed(1).replace(".",",")}</b> · <b>${esc(nb.split(" ").pop())} ${xb.toFixed(1).replace(".",",")}</b></span></div>`;
+    const sv=(P,n)=>P.speed&&P.speed.first?`<b>${esc(n.split(" ").pop())} ${kmh(P.speed.first)}</b>`:null,spd=[sv(A,na),sv(B,nb)].filter(Boolean);
+    if(spd.length)aces+=`<div class="meta"><span>Vitesse moyenne 1re balle ${spd.join(" · ")} <small>(${[speedYears(A),speedYears(B)].filter(Boolean)[0]||""})</small></span></div>`;
+    if(xa!=null&&xb!=null)aces+=`<div class="meta"><span>Aces attendus <b>${esc(na.split(" ").pop())} ${xa.toFixed(1).replace(".",",")}</b> · <b>${esc(nb.split(" ").pop())} ${xb.toFixed(1).replace(".",",")}</b></span></div>`;
   }
   out.innerHTML=`<div class="label">${esc(na)} (${pct(ha)}) contre ${esc(nb)} (${pct(hb)})</div>
    <div class="prob"><div><b>${esc(label)}</b><div class="note">Moyenne brute du modèle : ${mean.toFixed(1).replace(".",",")} jeux · cote juste ${odd(1/p)}</div></div><span class="big">${pct(p)}</span></div>
@@ -618,7 +620,7 @@ $("c-run").onclick=runComp;$("c-bo5").onchange=runComp;
 const SURF={Hard:"dur",Clay:"terre battue",Grass:"gazon"};
 const MIN_SURF=3;
 // Réponse d'une ancienne version du relais (sans stats par surface sur 60 matchs) : à redemander
-const isOld=P=>!!P&&P.clutch===undefined; // avant la v5 du relais // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
+const isOld=P=>!!P&&P.hands===undefined; // avant la v6 du relais // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
 let compSurf=store.get("vbt_csurf","all");
 function surfButtons(box,cur,withAuto,onPick){
   const opts=[[withAuto?"auto":"all",withAuto?"Auto":"Toutes"],["Hard","Dur"],["Clay","Terre battue"],["Grass","Gazon"]];
@@ -1007,6 +1009,9 @@ function sortWin(list){
 const surn=n=>esc(n.split(" ").pop());
 function sbar(lab,p,a,b){return `<span class="lab">${lab}</span><div class="sbar" title="${esc(a)} ${pct(p)} · ${esc(b)} ${pct(1-p)}"><i style="width:${Math.max(4,p*100)}%">${Math.round(p*100)}</i><span>${Math.round((1-p)*100)}</span></div>`}
 const ratio=o=>o&&o.n?o.w/o.n:null;
+// Vitesse de service : Tennis Abstract la donne en mph, mesurée à Wimbledon et à l'US Open
+const KMH=1.609344,kmh=v=>v==null?"–":Math.round(v*KMH)+" km/h";
+const speedYears=P=>{const s=P&&P.speed;if(!s)return"";const y=[s.latest,s.oldest].map(x=>(x||"").match(/\d{4}/)).filter(Boolean).map(m=>m[0]);return y.length?[...new Set(y)].sort().join("-"):""};
 const frac=(w,n)=>n?`${w}/${n} <small>${pct(w/n)}</small>`:"–";
 const handOf=P=>{const b=P.bio;if(!b||!b.hand||b.hand==="U")return null;return (b.hand==="L"?"Gaucher":"Droitier")+(b.backhand?`<br><small>revers ${b.backhand===1?"à 1 main":"à 2 mains"}</small>`:"")};
 const ageOf=P=>P.bio&&P.bio.age!=null?P.bio.age:P.elo&&P.elo.age!=null?P.elo.age:null;
@@ -1029,6 +1034,9 @@ function cmpTable(m){
       ["Tendance (5 derniers vs 20)",trendOf(qa),trendOf(qb),v=>v==null?"–":v>.1?"↑ en progrès":v<-.1?"↓ en baisse":"= stable",1],
       ["Victoires (attendues selon les adversaires)",qa?qa.wins-qa.expWins:null,qb?qb.wins-qb.expWins:null,(v,P)=>P.quality?`${P.quality.wins}/${P.quality.n} <small>(${P.quality.expWins.toFixed(1).replace(".",",")})</small>`:P.results?`${P.wins}/${P.results}`:"–",1],
       ["Contre mieux classés",ratio(qa&&qa.vsBetter),ratio(qb&&qb.vsBetter),(v,P)=>P.quality?frac(P.quality.vsBetter.w,P.quality.vsBetter.n):"–",1],
+      ["Contre les gauchers (52 sem.)",ratio(A.hands&&A.hands.vsLefty),ratio(B.hands&&B.hands.vsLefty),(v,P)=>P.hands&&P.hands.vsLefty?frac(P.hands.vsLefty.w,P.hands.vsLefty.n):"–",1],
+      ["Contre les droitiers (52 sem.)",ratio(A.hands&&A.hands.vsRighty),ratio(B.hands&&B.hands.vsRighty),(v,P)=>P.hands&&P.hands.vsRighty?frac(P.hands.vsRighty.w,P.hands.vsRighty.n):"–",1],
+      ["Contre le top 10 (52 sem.)",ratio(A.hands&&A.hands.vsTop10),ratio(B.hands&&B.hands.vsTop10),(v,P)=>P.hands&&P.hands.vsTop10?frac(P.hands.vsTop10.w,P.hands.vsTop10.n):"–",1],
       ["Contre le top 50",ratio(qa&&qa.top50),ratio(qb&&qb.top50),(v,P)=>P.quality?frac(P.quality.top50.w,P.quality.top50.n):"–",1],
       ["Meilleure victoire",qa&&qa.bestWin?qa.bestWin.rank:null,qb&&qb.bestWin?qb.bestWin.rank:null,(v,P)=>v==null?"–":`#${v}${P.quality.bestWin.name?" <small>"+esc(P.quality.bestWin.name.split(" ").pop())+"</small>":""}`,-1],
       ["Rang médian des adversaires",qa?qa.medianOpp:null,qb?qb.medianOpp:null,v=>v==null?"–":"#"+v,-1],
@@ -1057,6 +1065,9 @@ function cmpTable(m){
       ["Points gagnés sur 1re balle",sa.firstWon,sb.firstWon,v=>v==null?"–":pct(v),1],
       ["Points gagnés sur 2e balle",sa.secondWon,sb.secondWon,v=>v==null?"–":pct(v),1],
       ["Doubles fautes",sa.df,sb.df,v=>v==null?"–":pct(v),-1],
+      ["Vitesse moyenne 1re balle",A.speed&&A.speed.first,B.speed&&B.speed.first,(v,P)=>v==null?"–":`${kmh(v)}<br><small>${speedYears(P)}</small>`,1],
+      ["Vitesse moyenne 2e balle",A.speed&&A.speed.second,B.speed&&B.speed.second,v=>kmh(v),1],
+      ["Service le plus rapide",A.speed&&A.speed.max,B.speed&&B.speed.max,v=>kmh(v),1],
     ]],
     ["Mental",[
       ["Balles de break sauvées",ca&&ca.bpFaced?ca.bpSaved/ca.bpFaced:null,cb&&cb.bpFaced?cb.bpSaved/cb.bpFaced:null,(v,P)=>P.clutch?frac(P.clutch.bpSaved,P.clutch.bpFaced):"–",1],
@@ -1071,10 +1082,10 @@ function cmpTable(m){
     if(dir&&va!=null&&vb!=null&&va!==vb){if(dir>0?va>vb:va<vb)c1="best";else c2="best"}
     return `<tr><td class="${c1}">${fmt(va,A)}</td><th>${lab}</th><td class="${c2}">${fmt(vb,B)}</td></tr>`}).join("")}</tbody></table></details>`).join("");
   const h=m.h2h;
-  const h2hHtml=h&&h.n?`<p class="note" style="margin:4px 0">${surn(m.a)} <b class="num">${h.a}–${h.b}</b> ${surn(m.b)}${Object.keys(h.surf||{}).length?" · "+Object.entries(h.surf).map(([k,v])=>`${SURF[k]||esc(k)} ${v.a}–${v.b}`).join(" · "):""}${h.last?`<br>Dernier match : victoire de ${h.last.aWon?surn(m.a):surn(m.b)} (${esc(h.last.tourney||"")}, ${esc(h.last.score||"")})`:""}</p>`
+  const h2hHtml=h&&h.n?`<p class="note" style="margin:4px 0">${surn(m.a)} <b class="num">${h.a}–${h.b}</b> ${surn(m.b)}${h.career?` <small>(toute la carrière${h.first?", depuis "+esc(h.first):""})</small>`:""}${h.tbN?`<br>Tie-breaks entre eux : ${surn(m.a)} ${h.tbA}–${h.tbN-h.tbA}`:""}${Object.keys(h.surf||{}).length?`<br>Récemment par surface : `+Object.entries(h.surf).map(([k,v])=>`${SURF[k]||esc(k)} ${v.a}–${v.b}`).join(" · "):""}${h.last?`<br>Dernier match récent : victoire de ${h.last.aWon?surn(m.a):surn(m.b)} (${esc(h.last.tourney||"")}, ${esc(h.last.score||"")})`:""}</p>`
     :`<p class="note" style="margin:4px 0">${h?"Aucun match entre eux dans l'historique récent.":"Face-à-face pas encore disponible : relance l'analyse."}</p>`;
   return `<details class="allstats"><summary>Comparer toutes les stats</summary>${html}<details class="grp"><summary>Face-à-face</summary>${h2hHtml}</details>
-    <p class="note" style="margin:6px 0 0">En orange : le meilleur des deux. Forme et service sur les 20 derniers matchs, surface, mental et niveaux sur les 60 derniers. ▸ = surface utilisée. Entre parenthèses : victoires attendues d'après le classement des adversaires. Dates de fatigue : début de tournoi.</p></details>`;
+    <p class="note" style="margin:6px 0 0">Vitesse de service : moyenne des derniers matchs mesurés par radar à Wimbledon et à l'US Open (année indiquée), seule source disponible. En orange : le meilleur des deux. Forme et service sur les 20 derniers matchs ; surface, niveaux, tie-breaks, gauchers/droitiers sur les 52 dernières semaines ; face-à-face sur toute la carrière. ▸ = surface utilisée. Entre parenthèses : victoires attendues d'après le classement des adversaires. Dates de fatigue : début de tournoi.</p></details>`;
 }
 // Signaux sur la qualité des résultats récents
 function alerts(m){
@@ -1089,10 +1100,11 @@ function alerts(m){
   for(const [n,P] of [[m.a,m.A],[m.b,m.B]]){
     if(!P)continue;const nm=surn(n),f=fatiguePen(P);
     if(f.v>=.08)out.push(`⚠ ${nm} : ${f.why.join(", ")}.`);
-    if(P.bio&&P.bio.hand==="L")out.push(`ℹ ${nm} est gaucher.`);
+    if(P.bio&&P.bio.hand==="L"){const O=P===m.A?m.B:m.A,on=surn(P===m.A?m.b:m.a),v=O&&O.hands&&O.hands.vsLefty;
+      out.push(`ℹ ${nm} est gaucher.${v&&v.n?` ${on} contre les gauchers cette année : ${v.w}/${v.n}${O.hands.vsRighty&&O.hands.vsRighty.n?` (contre droitiers ${pct(O.hands.vsRighty.w/O.hands.vsRighty.n)})`:""}.`:""}`)}
   }
   const h=m.h2h;
-  if(h&&h.n>=3)out.push(`ℹ Face-à-face : ${h.a===h.b?`égalité ${h.a}–${h.b}`:`${h.a>h.b?surn(m.a):surn(m.b)} mène ${Math.max(h.a,h.b)}–${Math.min(h.a,h.b)}`}.`);
+  if(h&&h.n>=3)out.push(`ℹ Face-à-face${h.career?" (carrière)":""} : ${h.a===h.b?`égalité ${h.a}–${h.b}`:`${h.a>h.b?surn(m.a):surn(m.b)} mène ${Math.max(h.a,h.b)}–${Math.min(h.a,h.b)}`}.`);
   return out.length?`<div class="note">${out.join("<br>")}</div>`:"";
 }
 // Détail du % « Stats » : chaque morceau, puis les ajustements fatigue et face-à-face
