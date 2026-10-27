@@ -1,0 +1,41 @@
+{
+ "best": {
+  "h": 1,
+  "k_surf": 30,
+  "prior": 300
+ },
+ "res": {
+  "Actuel (20 derniers + 52 sem. surface)": {
+   "train": 0.005100287416026857,
+   "test": 0.005041713672518974
+  },
+  "Carri\u00e8re (demi-vie 1 an, surface k=30, a priori 300 pts)": {
+   "train": 0.004928343161305083,
+   "test": 0.004770777224511013
+  },
+  "M\u00e9lange 0 % r\u00e9cent / 100 % carri\u00e8re": {
+   "train": 0.004928343161305083,
+   "test": 0.004770777224511013
+  },
+  "M\u00e9lange 10 % r\u00e9cent / 90 % carri\u00e8re": {
+   "train": 0.004894684716604485,
+   "test": 0.004749578334874461
+  },
+  "M\u00e9lange 20 % r\u00e9cent / 80 % carri\u00e8re": {
+   "train": 0.004872326909720059,
+   "test": 0.004739111119557319
+  },
+  "M\u00e9lange 30 % r\u00e9cent / 70 % carri\u00e8re": {
+   "train": 0.004861269740651806,
+   "test": 0.004739375578559587
+  },
+  "M\u00e9lange 40 % r\u00e9cent / 60 % carri\u00e8re": {
+   "train": 0.004861513209399725,
+   "test": 0.004750371711881266
+  },
+  "M\u00e9lange 50 % r\u00e9cent / 50 % carri\u00e8re": {
+   "train": 0.004873057315963817,
+   "test": 0.004772099519522357
+  }
+ }
+}

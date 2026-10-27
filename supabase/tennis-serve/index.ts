@@ -3,6 +3,7 @@
 //   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
 // v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
 //      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
+// v7 : toute la carrière (saisons circuit + Challengers, surfaces) ; jeux du 1er set des derniers matchs.
 // v6 : lit aussi les autres tableaux de la page Tennis Abstract : bilans sur 52 semaines (surface, niveau,
 //      contre gauchers/droitiers), face-à-face de toute la carrière, vitesse de service (mph).
 const CORS = {
@@ -184,6 +185,68 @@ function serveSpeed(js: string) {
   return { n: rows.length, avg: av("Avg Speed"), first: av("1st Avg"), second: av("2nd Avg"), max: mx("Max 1st"), latest: rows[0][0] || null, oldest: rows[rows.length - 1][0] || null };
 }
 
+// ---------- Toute la carrière : saisons (circuit + Challengers) et surfaces
+// Testé sur 43 000 matchs ATP (model/career_eval.py) : saisons pondérées avec une demi-vie de 1 an,
+// 300 points d'a priori, écart de surface de la carrière réduit selon le nombre de matchs (k = 30).
+const HALF_LIFE = 1, PRIOR_PTS = 300, K_SURF = 30, PTS_PER_MATCH = 80, CHALL_ADJ = 0.018;
+function careerStats(js: string, wta: boolean) {
+  const avgS = wta ? 0.56 : 0.64;
+  const now = new Date(), t = now.getUTCFullYear() + (now.getTime() - Date.UTC(now.getUTCFullYear(), 0, 1)) / (365 * DAY);
+  const years: Record<string, unknown>[] = [];
+  let sw = 0, sv = 0, rw = 0, rv = 0, aw = 0, games = 0, sets = 0, tbs = 0, hw = 0, bw = 0, wsum = 0, m = 0, msAll = 0;
+  for (const [id, lvl] of [["tour-years", "tour"], ["chall-years", "chall"]] as const) {
+    const tb = table(js, id);
+    if (!tb) continue;
+    const col = (name: string) => tb.head.indexOf(name);
+    for (const r of tb.rows) {
+      const y = parseInt(r[0], 10);
+      if (!isFinite(y)) continue;
+      const g = (name: string) => { const i = col(name); return i < 0 ? undefined : r[i]; };
+      const pct = (name: string) => { const v = num(g(name)); return v === null ? null : v / 100; };
+      const M = num(g("M")) || 0, MS = num(g("MS")) || 0, spw = pct("SPW"), rpw = pct("RPW"), ace = pct("A%");
+      const st = wl(g("Set W-L")), gm = wl(g("Game W-L")), tbx = wl(g("TB W-L")), hold = pct("Hld%"), brk = pct("Brk%");
+      const adj = lvl === "chall" ? CHALL_ADJ : 0; // stats plus faciles face à des adversaires plus faibles
+      const age = y === Math.floor(t) ? (t - y) / 2 : t - (y + 0.5);
+      const w = Math.pow(0.5, Math.max(0, age) / HALF_LIFE);
+      m += M; msAll += MS;
+      if (MS > 0 && spw !== null && rpw !== null) {
+        const pts = MS * PTS_PER_MATCH * w;
+        sw += pts * (spw - adj); sv += pts; rw += pts * (rpw - adj); rv += pts;
+        if (ace !== null) aw += pts * ace;
+        if (hold !== null && brk !== null) { hw += MS * w * hold; bw += MS * w * brk; wsum += MS * w; }
+      }
+      if (st && gm && st[0] + st[1] > 0) { games += w * (gm[0] + gm[1]); sets += w * (st[0] + st[1]); if (tbx) tbs += w * (tbx[0] + tbx[1]); }
+      years.push({ y, lvl, m: M, ms: MS, spw, rpw, hold, brk, ace, gps: st && gm && st[0] + st[1] > 0 ? (gm[0] + gm[1]) / (st[0] + st[1]) : null,
+                   tbps: st && tbx && st[0] + st[1] > 0 ? (tbx[0] + tbx[1]) / (st[0] + st[1]) : null });
+    }
+  }
+  if (!sv) return null;
+  // Surfaces sur toute la carrière (circuit principal)
+  const cs = table(js, "career-splits");
+  const surf: Record<string, Record<string, number | null>> = {};
+  if (cs) {
+    const col = (name: string) => cs.head.indexOf(name);
+    const rowsS = cs.rows.filter((r) => ["Hard", "Clay", "Grass"].includes(r[0]));
+    const val = (r: string[], name: string) => { const v = num(r[col(name)]); return v === null ? null : v / 100; };
+    let a = 0, b = 0, n = 0;
+    for (const r of rowsS) { const MS = num(r[col("MS")]) || 0, s = val(r, "SPW"), q = val(r, "RPW"); if (MS && s !== null && q !== null) { a += MS * s; b += MS * q; n += MS; } }
+    if (n) for (const r of rowsS) {
+      const M = num(r[col("M")]) || 0, MS = num(r[col("MS")]) || 0, s = val(r, "SPW"), q = val(r, "RPW");
+      if (!MS || s === null || q === null) continue;
+      const k = M / (M + K_SURF);
+      surf[r[0]] = { m: M, dspw: (s - a / n) * k, drpw: (q - b / n) * k, spwRaw: s, rpwRaw: q, hold: val(r, "Hld%") };
+    }
+  }
+  years.sort((x, y) => (y.y as number) - (x.y as number));
+  return {
+    spw: (sw + PRIOR_PTS * avgS) / (sv + PRIOR_PTS), rpw: (rw + PRIOR_PTS * (1 - avgS)) / (rv + PRIOR_PTS),
+    ace: (aw + PRIOR_PTS * (wta ? 0.035 : 0.07)) / (sv + PRIOR_PTS),
+    hold: wsum ? hw / wsum : null, brk: wsum ? bw / wsum : null,
+    gps: sets ? (games + 5 * 9.6) / (sets + 5) : null, tbps: sets ? (tbs + 5 * 0.2) / (sets + 5) : null,
+    matches: m, withStats: msAll, seasons: new Set(years.map((x) => x.y)).size, years: years.slice(0, 12), surf,
+  };
+}
+
 // ---------- Elo (Tennis Abstract publie une page par circuit)
 type Elo = { tour: string; elo: number | null; hElo: number | null; cElo: number | null; gElo: number | null; eloRank: number | null; age: number | null };
 let eloCache: { at: number; map: Map<string, Elo> } | null = null;
@@ -257,6 +320,7 @@ async function player(name: string) {
       const sp52 = splits52(js);
       h2hMap = careerH2h(js);
       const speed = serveSpeed(js);
+      const car = careerStats(js, !!elo && /wta/i.test(elo.tour));
       const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
       const s60 = all.slice(0, 60); // surface, mental, service, niveaux : 60 derniers
       if (ms.length >= 3) {
@@ -388,10 +452,11 @@ async function player(name: string) {
           wins: res.filter(Boolean).length, results: res.length,
           winRate: res.length >= 5 ? res.filter(Boolean).length / res.length : null,
           form: ms.slice(0, 5).map((m) => (m.win === true ? "V" : m.win === false ? "D" : "?")).join(""),
-          surf, fatigue, clutch, serve, levels, hands, speed,
+          surf, fatigue, clutch, serve, levels, hands, speed, career: car,
           elo, bio: b,
           set1Over95: s1.length ? s1.filter((m) => (m.set1 as number) >= 10).length / s1.length : null,
           set1Sample: s1.length,
+          set1Recent: all.filter((m) => m.set1 !== null).slice(0, 40).map((m) => ({ g: m.set1, s: m.surface, w: m.win, o: m.opp, d: m.date })),
         };
       }
     }
@@ -448,7 +513,7 @@ Deno.serve(async (req) => {
       h2h[a + "|" + b] = { a: c.a, b: c.b, n: c.a + c.b, career: true, tbA: c.tbA, tbN: c.tbN, first: c.first, lastDate: c.last, surf: recent ? recent.surf : {}, last: recent ? recent.last : null };
     } else if (recent) h2h[a + "|" + b] = recent;
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 6, players: res, h2h }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 7, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });

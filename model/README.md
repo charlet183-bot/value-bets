@@ -14,3 +14,10 @@ Les coefficients de `final.coefs` sont recopiés dans `index.html` (constante `L
 5. `eval_games.py` : test sur 2024-2026 et correction logistique par marché (1er set, total, jeux d'un joueur) + correction des aces → `games_model.json`.
 
 Les coefficients sont recopiés dans `index.html` (constantes `GCAL` et `ACECAL`).
+
+## Toute la carrière + 1er set (27/10/2026)
+- `career.py` → reconstitue, avant chaque match ATP 2008-2026, les stats de toute la carrière saison par saison (comme les tableaux Tennis Abstract « tour-years », « chall-years », « career-splits ») et les 20 derniers matchs.
+- `career_eval.py` → meilleure pondération : demi-vie 1 an, 300 points d'a priori, écart de surface réduit (k = 30), mélange 70 % carrière / 30 % récent. Erreur sur le service du match suivant (test 2024-26) : 50,4 → 47,4 (×10⁻⁴), base 60,2.
+- `set1.py` → distribution complète des jeux du 1er set (modèle ordinal). Erreur sur la distribution 1,799 → 1,737 ; ligne 9,5 : ~57 % de bon sens. Habitudes des joueurs, Elo et cote Pinnacle n'ajoutent presque rien.
+- `career_all.py` → total de jeux, jeux par joueur (61,8 → 62,5 %), aces (3,18 → 3,10 d'erreur), vainqueur par le service (0,651 → 0,628).
+- `learned2.py` → poids du vainqueur réappris avec le service carrière : 64,8 → 65,1 % sur 2024-26.
