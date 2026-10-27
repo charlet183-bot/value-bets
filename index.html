@@ -307,7 +307,7 @@ const safeUrl=u=>typeof u==="string"&&/^https:\/\//i.test(u)?u:null;
 const lk=(o,m,b)=>safeUrl(o&&o.link)||safeUrl(m&&m.link)||safeUrl(b&&b.link)||null;
 function goHtml(book,link,copy){
   const url=safeUrl(link)||HOME[book];if(!url)return"";
-  return `<a class="gobtn" href="${esc(url)}" target="_blank" rel="noopener"${link?"":` data-copy="${esc(copy||"")}"`}>Ouvrir ${esc(book)} ↗</a>${link?"":`<span class="golab">Page tennis · ${copy?"nom copié, colle-le dans la recherche":"cherche le match"}</span>`}`;
+  return `<a class="gobtn" href="${esc(url)}" rel="noopener"${link?"":` data-copy="${esc(copy||"")}"`}>Ouvrir ${esc(book)} ↗</a>${link?"":`<span class="golab">Page tennis · ${copy?"nom copié, colle-le dans la recherche":"cherche le match"}</span>`}`;
 }
 document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest("a.gobtn[data-copy]");if(a&&a.dataset.copy){try{navigator.clipboard.writeText(a.dataset.copy)}catch(_){}}});
 
