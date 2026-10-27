@@ -84,6 +84,8 @@ button:disabled{opacity:.5;cursor:default}
 .duo .field input{width:100%}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .presets button{padding:6px 8px;font-size:12px}
+#mybooks button{padding:8px 10px;font-size:13px}
+#mybooks button[aria-pressed="true"]{background:var(--clay);border-color:var(--clay);color:#fff}
 .prob{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:baseline}
 .prob .big{font:700 34px/1 var(--f-num);color:var(--clay)}
 .dist{display:flex;align-items:flex-end;gap:3px;height:70px}
@@ -149,11 +151,13 @@ details summary{cursor:pointer;font-weight:600}
         <label class="label" for="stake">Mise</label>
         <input id="stake" class="num" type="number" inputmode="decimal" min="0" step="0.5" value="5" style="width:80px"> €
       </div>
+      <div class="field"><span class="label">Mes bookmakers</span><div id="mybooks" class="presets"></div></div>
       <div class="row">
         <button id="scan" class="primary grow">Chercher les value bets</button>
         <button id="demo" class="small">Exemple</button>
       </div>
       <div id="status" class="status">Exemple chargé ci-dessous. Ajoute ta clé pour les vraies cotes.</div>
+      <p class="note" style="margin:0">Tes recherches restent enregistrées sur ce téléphone : tu peux fermer l'appli, changer le seuil ou tes bookmakers sans repayer de crédits.</p>
     </div>
     <div id="results" class="wrap" style="padding:0"></div>
     <details class="panel">
@@ -279,6 +283,9 @@ details summary{cursor:pointer;font-weight:600}
 <script>
 const BOOKS={winamax_fr:"Winamax",betclic_fr:"Betclic",unibet_fr:"Unibet",parionssport_fr:"Parions Sport",pmu_fr:"PMU",netbet_fr:"NetBet"};
 const SHARP="pinnacle";
+// Bookmakers où Kobah a un compte : seuls ceux-là sont proposés (les cotes des autres restent téléchargées, rien à repayer si on change)
+let myBooks=(()=>{try{const v=JSON.parse(localStorage.getItem("vbt_mybooks"));return Array.isArray(v)&&v.length?v:["winamax_fr"]}catch(e){return ["winamax_fr"]}})();
+const isMine=k=>!!BOOKS[k]&&myBooks.includes(k);
 const API="https://api.the-odds-api.com/v4";
 const STATS="https://sxoaiurkgdetzvgjfsdx.supabase.co/functions/v1/tennis-serve";
 const $=id=>document.getElementById(id);
@@ -304,6 +311,17 @@ function goHtml(book,link,copy){
 }
 document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest("a.gobtn[data-copy]");if(a&&a.dataset.copy){try{navigator.clipboard.writeText(a.dataset.copy)}catch(_){}}});
 
+// Recherches gardées sur le téléphone : on peut fermer l'appli sans repayer de crédits
+const RUNS={};
+const slim=evs=>evs.map(e=>({id:e.id,sport_key:e.sport_key,sport_title:e.sport_title,commence_time:e.commence_time,home_team:e.home_team,away_team:e.away_team,
+  bookmakers:(e.bookmakers||[]).map(b=>({key:b.key,link:b.link||undefined,markets:b.markets.map(m=>({key:m.key,link:m.link||undefined,outcomes:m.outcomes.map(o=>({name:o.name,price:o.price,point:o.point,link:o.link||undefined}))}))}))}));
+function saveRun(k,d){RUNS[k]=d;try{localStorage.setItem("vbt_run_"+k,JSON.stringify(d))}catch(e){}}
+function loadRuns(){for(const k of ["scan","jeuxvb","rank","win"]){try{const v=localStorage.getItem("vbt_run_"+k);if(v)RUNS[k]=JSON.parse(v)}catch(e){}}}
+const future=evs=>evs.filter(e=>new Date(e.commence_time).getTime()>Date.now());
+function ago(t){const m=Math.round((Date.now()-t)/60000);if(m<1)return"à l'instant";if(m<60)return`il y a ${m} min`;if(m<1440)return`il y a ${Math.floor(m/60)} h ${String(m%60).padStart(2,"0")}`;const d=new Date(t);return"le "+d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})+" à "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}
+const savedNote=d=>`Recherche ${ago(d.at)}, gardée en mémoire (0 crédit). Relance seulement pour actualiser les cotes.`;
+function statsFor(evs){const o={};for(const e of evs)for(const n of [e.home_team,e.away_team])if(n in statCache)o[n]=statCache[n];return o}
+
 // Calcul : probabilité juste Pinnacle (marge retirée), puis avantage des books FR
 function analyse(events,minEdge){
   const out=[];
@@ -316,7 +334,7 @@ function analyse(events,minEdge){
     const fair={}; sm.outcomes.forEach((o,i)=>fair[o.name]=inv[i]/tot);
     const hits=[];
     for(const b of books){
-      if(!BOOKS[b.key])continue;
+      if(!isMine(b.key))continue;
       const m=b.markets.find(m=>m.key==="h2h"); if(!m)continue;
       for(const o of m.outcomes){
         const p=fair[o.name]; if(!p)continue;
@@ -367,14 +385,20 @@ async function scan(){
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
     }
-    const now=Date.now();
-    all=all.filter(e=>new Date(e.commence_time).getTime()>now); // avant-match uniquement
-    const res=analyse(all,+$("minedge").value);
-    render(res,false);
-    setStatus(`${all.length} matchs analysés sur ${sports.length} tournoi(s) · ${res.length} avec value · crédits restants : ${left}`);
+    all=future(all); // avant-match uniquement
+    saveRun("scan",{at:Date.now(),events:slim(all),left,sports:sports.length});
+    showScan(true);
   }catch(e){
     setStatus(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true);
   }finally{$("scan").disabled=false}
+}
+
+function showScan(fresh){
+  const d=RUNS.scan;if(!d)return false;
+  const ev=future(d.events),res=analyse(ev,+$("minedge").value);
+  render(res,false);
+  setStatus(`${ev.length} matchs à venir · ${res.length} avec value chez tes bookmakers · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d)));
+  return true;
 }
 
 // Jeux : totals (Over/Under) et spreads (handicaps), comparés ligne par ligne à Pinnacle
@@ -400,7 +424,7 @@ function analyseGames(events,minEdge){
     }
     const best={};
     for(const b of books){
-      if(!BOOKS[b.key])continue;
+      if(!isMine(b.key))continue;
       for(const m of b.markets){
         if(m.key!=="totals"&&m.key!=="spreads")continue;
         for(const o of m.outcomes){
@@ -433,13 +457,20 @@ async function scanGames(){
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
     }
-    const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
-    const withLines=all.filter(e=>(e.bookmakers||[]).some(b=>BOOKS[b.key]&&b.markets.length)).length;
-    const res=analyseGames(all,+$("minedge").value);
-    render(res,false,"results-jeux","jeux");
-    st(`${all.length} matchs analysés · ${withLines} avec des lignes chez les books français · ${res.length} avec value · crédits restants : ${left}`);
+    all=future(all);
+    saveRun("jeuxvb",{at:Date.now(),events:slim(all),left});store.set("vbt_jeux_last","jeuxvb");
+    showJeuxVb(true);
   }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
   finally{$("scan-jeux").disabled=false}
+}
+function showJeuxVb(fresh){
+  const d=RUNS.jeuxvb;if(!d)return false;
+  const all=future(d.events),withLines=all.filter(e=>(e.bookmakers||[]).some(b=>isMine(b.key)&&b.markets.length)).length;
+  const res=analyseGames(all,+$("minedge").value);
+  $("sortrow").hidden=true;render(res,false,"results-jeux","jeux");
+  $("status-jeux").className="status";
+  $("status-jeux").textContent=`${all.length} matchs à venir · ${withLines} avec des lignes chez tes bookmakers · ${res.length} avec value · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
+  return true;
 }
 $("scan-jeux").onclick=scanGames;
 // Comparateur : simulation Monte-Carlo d'un match en 2 sets gagnants, jeu par jeu
@@ -556,7 +587,7 @@ function rankMatches(events){
     lines.sort((a,b)=>Math.abs(a.pOver-.5)-Math.abs(b.pOver-.5));
     const L=lines[0],est=L.pt+(L.pOver-.5)*8; // ligne principale ajustée
     let best=null;
-    for(const b of books){if(!BOOKS[b.key])continue;const m=b.markets.find(x=>x.key==="totals");if(!m)continue;
+    for(const b of books){if(!isMine(b.key))continue;const m=b.markets.find(x=>x.key==="totals");if(!m)continue;
       for(const o of m.outcomes){if(o.name!=="Over")continue;const f=lines.find(l=>l.pt===o.point);if(!f)continue;
         const edge=o.price*f.pOver-1;if(!best||edge>best.edge)best={book:BOOKS[b.key],pt:o.point,price:o.price,p:f.pOver,edge,link:lk(o,m,b)}}}
     out.push({ev,tour:ev.sport_title,start:ev.commence_time,a:h.outcomes[0].name,b:h.outcomes[1].name,pa,line:L.pt,pOver:L.pOver,est,bal:1-Math.abs(pa-(1-pa)),best});
@@ -607,15 +638,23 @@ async function rankGames(){
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
     }
-    const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
-    const res=rankMatches(all);
+    all=future(all);
     st("Récupération des stats de service des joueurs…");
-    await fetchStats(res.flatMap(m=>[m.a,m.b]));
-    res.forEach(m=>m.sv=serveView(m));
-    lastRank=res;$("sortrow").hidden=false;renderRank(sortRank(res));
-    st(`${res.length} matchs classés sur ${all.length} à venir · stats de service trouvées pour ${res.filter(m=>m.sv).length} · crédits restants : ${left}`);
+    await fetchStats(rankMatches(all).flatMap(m=>[m.a,m.b]));
+    saveRun("rank",{at:Date.now(),events:slim(all),left,stats:statsFor(all)});store.set("vbt_jeux_last","rank");
+    showRank(true);
   }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
   finally{$("rank-jeux").disabled=false}
+}
+function showRank(fresh){
+  const d=RUNS.rank;if(!d)return false;
+  Object.assign(statCache,d.stats||{});
+  const all=future(d.events),res=rankMatches(all);
+  res.forEach(m=>m.sv=serveView(m));
+  lastRank=res;$("sortrow").hidden=false;renderRank(sortRank(res));
+  $("status-jeux").className="status";
+  $("status-jeux").textContent=`${res.length} matchs classés sur ${all.length} à venir · stats de service trouvées pour ${res.filter(m=>m.sv).length} · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
+  return true;
 }
 $("rank-jeux").onclick=rankGames;
 $("sortby").onchange=()=>{if(lastRank.length)renderRank(sortRank(lastRank))};
@@ -703,7 +742,7 @@ function analyseWinners(events,minEdge){
     const pFin=st?unlogit(.65*logit(pPin)+.35*logit(st.p)):pPin;
     const best=[null,null];
     for(const bk of books){
-      if(!BOOKS[bk.key])continue;const m=bk.markets.find(x=>x.key==="h2h");if(!m)continue;
+      if(!isMine(bk.key))continue;const m=bk.markets.find(x=>x.key==="h2h");if(!m)continue;
       for(const o of m.outcomes){const i=o.name===a?0:o.name===b?1:-1;if(i<0)continue;if(!best[i]||o.price>best[i].price)best[i]={book:BOOKS[bk.key],price:o.price,link:lk(o,m,bk)}}
     }
     const probs=[pFin,1-pFin];
@@ -794,17 +833,25 @@ async function runWinners(){
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
     }
-    const now=Date.now();all=all.filter(e=>new Date(e.commence_time).getTime()>now);
+    all=future(all);
     const names=all.flatMap(e=>{const sh=(e.bookmakers||[]).find(b=>b.key===SHARP),m=sh&&sh.markets.find(x=>x.key==="h2h");return m?m.outcomes.map(o=>o.name):[]});
     st(`Récupération des stats de ${new Set(names).size} joueurs…`);
     // anciennes réponses du relais (sans retour ni forme) : on les redemande
     for(const n of names)if(statCache[n]&&statCache[n].quality===undefined)delete statCache[n];
     await fetchStats(names);
-    const res=analyseWinners(all,+$("minedge").value);
-    lastWin=res;$("win-sortrow").hidden=!res.length;renderWin(sortWin(res));
-    st(`${res.length} matchs analysés · stats complètes pour ${res.filter(m=>m.st).length} · ${res.filter(m=>m.val).length} value bet(s) sur le vainqueur · crédits restants : ${left}`);
+    saveRun("win",{at:Date.now(),events:slim(all),left,stats:statsFor(all)});
+    showWin(true);
   }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
   finally{$("win-run").disabled=false}
+}
+function showWin(fresh){
+  const d=RUNS.win;if(!d)return false;
+  Object.assign(statCache,d.stats||{});
+  const res=analyseWinners(future(d.events),+$("minedge").value);
+  lastWin=res;$("win-sortrow").hidden=!res.length;renderWin(sortWin(res));
+  $("status-win").className="status";
+  $("status-win").textContent=`${res.length} matchs à venir · stats complètes pour ${res.filter(m=>m.st).length} · ${res.filter(m=>m.val).length} value bet(s) chez tes bookmakers · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
+  return true;
 }
 $("win-run").onclick=runWinners;
 $("win-sort").onchange=()=>{if(lastWin.length)renderWin(sortWin(lastWin))};
@@ -882,8 +929,23 @@ $("m-ok").onclick=()=>{
 };
 function setTab(t){for(const k of ["scan","win","jeux","comp","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-win").onclick=()=>setTab("win");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
-$("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=()=>{if($("status").textContent.startsWith("Exemple"))showDemo()};
-showDemo();renderBets();
+function refreshAll(){
+  if(!showScan())showDemo();
+  showWin();
+  const last=store.get("vbt_jeux_last",null);if(last==="rank")showRank();else if(last==="jeuxvb")showJeuxVb();
+}
+function renderMyBooks(){
+  $("mybooks").innerHTML=Object.entries(BOOKS).map(([k,n])=>`<button type="button" data-book="${k}" aria-pressed="${myBooks.includes(k)}">${myBooks.includes(k)?"✓ ":""}${esc(n)}</button>`).join("");
+  $("mybooks").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.book,on=myBooks.includes(k);
+    if(on&&myBooks.length===1)return; // au moins un bookmaker
+    myBooks=on?myBooks.filter(x=>x!==k):[...myBooks,k];
+    try{localStorage.setItem("vbt_mybooks",JSON.stringify(myBooks))}catch(e){}
+    renderMyBooks();refreshAll();
+  });
+}
+$("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=refreshAll;
+loadRuns();renderMyBooks();refreshAll();renderBets();
 </script>
 </body>
 </html>
