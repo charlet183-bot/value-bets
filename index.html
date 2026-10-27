@@ -84,7 +84,8 @@ button:disabled{opacity:.5;cursor:default}
 .duo .field input{width:100%}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .presets button{padding:6px 8px;font-size:12px}
-#mybooks button{padding:8px 10px;font-size:13px}
+#mybooks button,.surfs button{padding:8px 10px;font-size:13px}
+.surfs button[aria-pressed="true"]{background:var(--clay);border-color:var(--clay);color:#fff}
 #mybooks button[aria-pressed="true"]{background:var(--clay);border-color:var(--clay);color:#fff}
 .prob{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:baseline}
 .prob .big{font:700 34px/1 var(--f-num);color:var(--clay)}
@@ -172,6 +173,8 @@ details summary{cursor:pointer;font-weight:600}
     <div class="panel">
       <div class="label">Qui va gagner ?</div>
       <p class="note" style="margin:0">Pour chaque match à venir, l'appli compare les stats des deux joueurs sur leurs 20 derniers matchs (points gagnés au service et au retour, classement, forme, surface), en tire une probabilité, puis la confronte à Pinnacle. Utilise la clé et le seuil de l'onglet Value. Coûte 1 crédit par tournoi.</p>
+      <div class="field"><span class="label">Surface</span><div id="win-surf" class="presets surfs"></div>
+        <span class="note">Auto : surface du dernier match des joueurs. Choisis-la toi-même si un tournoi change de surface.</span></div>
       <div class="row"><button id="win-run" class="primary grow">Analyser les matchs</button></div>
       <div id="status-win" class="status">Les stats viennent de Tennis Abstract : les joueurs peu connus (Challenger, ITF) peuvent manquer.</div>
     </div>
@@ -215,6 +218,7 @@ details summary{cursor:pointer;font-weight:600}
         <div class="field"><label class="label" for="c-line">Ligne</label><input id="c-line" class="num" type="number" step="0.5" inputmode="decimal" value="9.5"></div>
         <div class="field"><label class="label" for="c-odds">Cote du book (option)</label><input id="c-odds" class="num" type="number" step="0.01" inputmode="decimal" placeholder="ex. 1,85"></div>
       </div>
+      <div class="field"><span class="label">Surface du match</span><div id="c-surf" class="presets surfs"></div></div>
       <div class="row"><button id="c-auto" class="grow">Remplir les % auto</button><button id="c-run" class="primary grow">Calculer</button></div>
     </div>
     <div id="c-out" class="panel"></div>
@@ -531,16 +535,43 @@ function runComp(){
   const bb=$("c-bet");if(bb)bb.onclick=()=>openSheet({match:na+" – "+nb,tour:"Comparateur",start:new Date().toISOString(),player:label,book:"—",price:odds,p,demo:false,cat:"comp"});
 }
 $("c-run").onclick=runComp;
-$("c-auto").onclick=async()=>{
-  const a=$("c-na").value.trim(),b=$("c-nb").value.trim();
+// Surfaces : dur, terre battue, gazon (noms Tennis Abstract : Hard, Clay, Grass)
+const SURF={Hard:"dur",Clay:"terre battue",Grass:"gazon"};
+const MIN_SURF=3;
+// Réponse d'une ancienne version du relais (sans stats par surface sur 60 matchs) : à redemander
+const isOld=P=>!!P&&(P.quality===undefined||!Object.values(P.surf||{}).some(g=>g&&g.hold!=null)); // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
+let compSurf=store.get("vbt_csurf","all");
+function surfButtons(box,cur,withAuto,onPick){
+  const opts=[[withAuto?"auto":"all",withAuto?"Auto":"Toutes"],["Hard","Dur"],["Clay","Terre battue"],["Grass","Gazon"]];
+  $(box).innerHTML=opts.map(([k,l])=>`<button type="button" data-s="${k}" aria-pressed="${cur===k}">${cur===k?"✓ ":""}${l}</button>`).join("");
+  $(box).querySelectorAll("button").forEach(b=>b.onclick=()=>onPick(b.dataset.s));
+}
+// % de jeux de service gagnés sur une surface, ou toutes surfaces si trop peu de matchs
+function holdOn(P,sf){
+  const g=sf!=="all"&&P.surf&&P.surf[sf];
+  if(g&&g.n>=MIN_SURF)return{hold:g.hold!=null?g.hold:holdP(g.spw),n:g.n,surf:true};
+  return{hold:P.hold,n:g?g.n:0,surf:false};
+}
+async function compAuto(){
+  const a=$("c-na").value.trim(),b=$("c-nb").value.trim(),sf=compSurf;
   $("c-out").innerHTML='<span class="note">Recherche des stats de '+esc(a)+" et "+esc(b)+"…</span>";
+  for(const n of [a,b])if(isOld(statCache[n]))delete statCache[n];
   await fetchStats([a,b]);const A=statCache[a],B=statCache[b];
-  if(A)$("c-ha").value=(A.hold*100).toFixed(1);if(B)$("c-hb").value=(B.hold*100).toFixed(1);
+  const ha=A&&holdOn(A,sf),hb=B&&holdOn(B,sf);
+  if(ha)$("c-ha").value=(ha.hold*100).toFixed(1);if(hb)$("c-hb").value=(hb.hold*100).toFixed(1);
   const miss=[!A&&a,!B&&b].filter(Boolean);
   runComp();
   if(miss.length)$("c-out").insertAdjacentHTML("afterbegin",'<p class="err">Stats introuvables pour '+esc(miss.join(" et "))+". Tape le prénom et le nom complets, par exemple Taylor Fritz.</p>");
-};
-document.querySelectorAll(".presets button").forEach(b=>b.onclick=()=>{$("c-ha").value=b.dataset.pa;$("c-hb").value=b.dataset.pb;runComp()});
+  if(sf!=="all"){
+    const line=[[a,ha],[b,hb]].filter(([,h])=>h).map(([n,h])=>h.surf?`${esc(n)} : ${h.n} matchs sur ${SURF[sf]}`:`${esc(n)} : ${h.n} match${h.n>1?"s":""} sur ${SURF[sf]}, pas assez, stats toutes surfaces utilisées`).join(" · ");
+    if(line)$("c-out").insertAdjacentHTML("afterbegin",`<p class="note" style="margin:0">${line}</p>`);
+  }
+}
+function pickCompSurf(k){compSurf=k;store.set("vbt_csurf",k);surfButtons("c-surf",compSurf,false,pickCompSurf);
+  const a=$("c-na").value.trim(),b=$("c-nb").value.trim();if(statCache[a]||statCache[b])compAuto()}
+surfButtons("c-surf",compSurf,false,pickCompSurf);
+$("c-auto").onclick=compAuto;
+document.querySelectorAll(".presets button[data-pa]").forEach(b=>b.onclick=()=>{$("c-ha").value=b.dataset.pa;$("c-hb").value=b.dataset.pb;runComp()});
 // Modèle exact : distribution des jeux d'un set en partant du % de jeux de service gagnés
 const clampTb=(ha,hb)=>Math.min(.8,Math.max(.2,.5+(ha-hb)*1.2));
 function setDist(ha,hb){
@@ -716,13 +747,14 @@ function setP(ha,hb,ptb){
 const matchP=(s,bo5)=>bo5?s**3*(1+3*(1-s)+6*(1-s)**2):s*s*(3-2*s);
 const logit=p=>{p=Math.min(.97,Math.max(.03,p));return Math.log(p/(1-p))};
 const unlogit=x=>1/(1+Math.exp(-x));
-function pickSurf(A,B){return A.lastSurface&&A.lastSurface===B.lastSurface?A.lastSurface:(A.lastSurface||B.lastSurface||null)}
+let winSurf=store.get("vbt_wsurf","auto");
+function pickSurf(A,B){if(winSurf!=="auto")return winSurf;return A.lastSurface&&A.lastSurface===B.lastSurface?A.lastSurface:(A.lastSurface||B.lastSurface||null)}
 // Stat mélangée : surface du moment (si assez de matchs) + global
 function blendStat(P,surf,k){
   const ka=k+"Adj",kk=P[ka]!=null?ka:k; // stats corrigées selon le niveau des adversaires si dispo
   const base=P[kk],s0=surf&&P.surf&&P.surf[surf],s=s0&&s0[kk]!=null?{n:s0.n,[k]:s0[kk]}:s0&&{n:s0.n,[k]:s0[k]};
   if(base==null)return null;
-  if(!s||s[k]==null)return base;
+  if(!s||s[k]==null||s.n<MIN_SURF)return base;
   return (s.n*s[k]+6*base)/(s.n+6);
 }
 function statModel(A,B,wta,bo5){
@@ -778,6 +810,12 @@ function cmpTable(m){
   const qa=A.quality,qb=B.quality;
   const rows=[
     ["Classement",A.rank,B.rank,v=>v?"#"+v:"–",-1],
+    ...["Hard","Clay","Grass"].map(sf=>{
+      const ga=A.surf&&A.surf[sf],gb=B.surf&&B.surf[sf],cur=m.st&&m.st.surf===sf;
+      const r=g=>g&&g.known?g.wins/g.known:null;
+      const f=(v,P)=>{const g=P.surf&&P.surf[sf];if(!g)return"–";const h=g.hold!=null?g.hold:holdP(g.spw);return`${g.known?g.wins+"/"+g.known:g.n+" m."}<br><small>srv ${pct(h)}</small>`};
+      return [(cur?"▸ ":"")+"Sur "+SURF[sf],r(ga),r(gb),f,1];
+    }),
     ["Forme (5 derniers)",A.form,B.form,v=>v?`<span class="form">${esc(v)}</span>`:"–",0],
     ["Victoires (attendues selon les adversaires)",qa?qa.wins-qa.expWins:null,qb?qb.wins-qb.expWins:null,(v,P)=>P.quality?`${P.quality.wins}/${P.quality.n} <small>(${P.quality.expWins.toFixed(1).replace(".",",")})</small>`:P.results?`${P.wins}/${P.results}`:"–",1],
     ["Contre mieux classés",qa&&qa.vsBetter.n?qa.vsBetter.w/qa.vsBetter.n:null,qb&&qb.vsBetter.n?qb.vsBetter.w/qb.vsBetter.n:null,(v,P)=>P.quality?`${P.quality.vsBetter.w}/${P.quality.vsBetter.n}`:"–",1],
@@ -795,7 +833,7 @@ function cmpTable(m){
     if(dir&&va!=null&&vb!=null&&va!==vb){const aBetter=dir>0?va>vb:va<vb;if(aBetter)ca="best";else cb="best"}
     return `<tr><td class="${ca}">${fmt(va,A)}</td><th>${lab}</th><td class="${cb}">${fmt(vb,B)}</td></tr>`}).join("");
   return `<details><summary>Comparer toutes les stats</summary><table class="cmp"><thead><tr><td>${surn(m.a)}</td><td></td><td>${surn(m.b)}</td></tr></thead><tbody>${tr}</tbody></table>
-    <p class="note" style="margin:6px 0 0">Entre parenthèses : victoires qu'il aurait dû avoir d'après le classement de ses adversaires. Sur les 20 derniers matchs${m.st&&m.st.surf?", pondéré vers la surface "+esc(m.st.surf==="Hard"?"dur":m.st.surf==="Clay"?"terre battue":m.st.surf==="Grass"?"gazon":m.st.surf):""}. Service et retour ajustés à l'adversaire.</p></details>`;
+    <p class="note" style="margin:6px 0 0">Par surface : victoires et jeux de service gagnés sur les 60 derniers matchs, ▸ = surface utilisée pour ce match. Entre parenthèses : victoires qu'il aurait dû avoir d'après le classement de ses adversaires. Sur les 20 derniers matchs${m.st&&m.st.surf?", pondéré vers la surface "+esc(m.st.surf==="Hard"?"dur":m.st.surf==="Clay"?"terre battue":m.st.surf==="Grass"?"gazon":m.st.surf):""}. Service et retour ajustés à l'adversaire.</p></details>`;
 }
 // Signaux sur la qualité des résultats récents
 function alerts(m){
@@ -848,7 +886,7 @@ async function runWinners(){
     const names=all.flatMap(e=>{const sh=(e.bookmakers||[]).find(b=>b.key===SHARP),m=sh&&sh.markets.find(x=>x.key==="h2h");return m?m.outcomes.map(o=>o.name):[]});
     st(`Récupération des stats de ${new Set(names).size} joueurs…`);
     // anciennes réponses du relais (sans retour ni forme) : on les redemande
-    for(const n of names)if(statCache[n]&&statCache[n].quality===undefined)delete statCache[n];
+    for(const n of names)if(isOld(statCache[n]))delete statCache[n];
     await fetchStats(names);
     saveRun("win",{at:Date.now(),events:slim(all),left,stats:statsFor(all)});
     showWin(true);
@@ -864,6 +902,8 @@ function showWin(fresh){
   $("status-win").textContent=`${res.length} matchs à venir · stats complètes pour ${res.filter(m=>m.st).length} · ${res.filter(m=>m.val).length} value bet(s) chez tes bookmakers · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
   return true;
 }
+function pickWinSurf(k){winSurf=k;store.set("vbt_wsurf",k);surfButtons("win-surf",winSurf,true,pickWinSurf);showWin()}
+surfButtons("win-surf",winSurf,true,pickWinSurf);
 $("win-run").onclick=runWinners;
 $("win-sort").onchange=()=>{if(lastWin.length)renderWin(sortWin(lastWin))};
 

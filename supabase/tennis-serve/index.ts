@@ -1,6 +1,6 @@
 // Relais public en lecture seule : stats récentes d'un joueur (source : Tennis Abstract).
 // GET ?players=Taylor Fritz,Alexander Zverev  -> { players: { "Taylor Fritz": {...} | null } }
-// v3 : retour, classement, forme, surface, et qualité des adversaires (victoires pondérées, stats corrigées).
+// v4 : stats globales sur les 20 derniers matchs, stats par surface (dur, terre, gazon) sur les 60 derniers.
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -70,7 +70,7 @@ function parse(js: string, surname: string) {
     const m = score.match(/^(\d+)-(\d+)/);
     const win = result(match, surname);
     out.push({ date, surface, score, ace: a, spw, rpw, win, rank: isFinite(rank) ? rank : null, opp: opponent(match, win), oppRank: isFinite(oRank) ? oRank : (vrk.trim() === "" ? null : 999), set1: m ? +m[1] + +m[2] : null });
-    if (out.length >= 20) break;
+    if (out.length >= 60) break;
   }
   return out;
 }
@@ -87,7 +87,8 @@ async function player(name: string) {
     const r = await fetch(`https://www.tennisabstract.com/jsfrags/${key}.js`, { headers: { "User-Agent": "Mozilla/5.0" } });
     if (r.ok) {
       const surname = strip(name.trim().split(/\s+/).pop() || "");
-      const ms = parse(await r.text(), surname);
+      const all = parse(await r.text(), surname);
+      const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
       if (ms.length >= 3) {
         const spw = avg(ms.map((m) => m.spw)) as number;
         const ace = avg(ms.map((m) => m.ace)) as number;
@@ -98,13 +99,20 @@ async function player(name: string) {
         const oR = (m: M) => m.oppRank ?? 500;
         const spwAdj = avg(ms.map((m) => m.spw - oppAdj(oR(m)))) as number;
         const rpwAdj = avg(ms.filter((m) => m.rpw !== null).map((m) => (m.rpw as number) - oppAdj(oR(m))));
-        const surf: Record<string, { n: number; spw: number; rpw: number | null; spwAdj: number; rpwAdj: number | null; wins: number; known: number }> = {};
-        for (const sname of [...new Set(ms.map((m) => m.surface).filter(Boolean))]) {
-          const g = ms.filter((m) => m.surface === sname);
+        // Par surface : jusqu'à 60 matchs, pour avoir assez d'échantillon sur terre et gazon
+        const surf: Record<string, Record<string, unknown>> = {};
+        for (const sname of [...new Set(all.map((m) => m.surface).filter(Boolean))]) {
+          const g = all.filter((m) => m.surface === sname);
+          const g1 = g.filter((m) => m.set1 !== null);
+          const gspw = avg(g.map((m) => m.spw)) as number;
           const gr = g.map((m) => m.win).filter((x): x is boolean => x !== null);
           surf[sname] = {
             n: g.length,
-            spw: avg(g.map((m) => m.spw)) as number,
+            spw: gspw,
+            hold: holdFromPoint(gspw),
+            acesPerServiceGame: (avg(g.map((m) => m.ace)) as number) * 6.3,
+            set1Over95: g1.length ? g1.filter((m) => (m.set1 as number) >= 10).length / g1.length : null,
+            lastDate: g[0].date,
             rpw: avg(g.map((m) => m.rpw).filter((x): x is number => x !== null)),
             spwAdj: avg(g.map((m) => m.spw - oppAdj(oR(m)))) as number,
             rpwAdj: avg(g.filter((m) => m.rpw !== null).map((m) => (m.rpw as number) - oppAdj(oR(m)))),
@@ -179,7 +187,7 @@ Deno.serve(async (req) => {
     const got = await Promise.all(part.map(player));
     part.forEach((n, j) => (res[n] = got[j]));
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 3, players: res }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 4, players: res }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });
