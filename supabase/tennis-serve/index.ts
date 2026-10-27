@@ -1,21 +1,27 @@
 // Relais public en lecture seule : stats récentes d'un joueur (source : Tennis Abstract).
-// GET ?players=Taylor Fritz,Alexander Zverev  -> { players: { "Taylor Fritz": {...} | null } }
-// v4 : stats globales sur les 20 derniers matchs, stats par surface (dur, terre, gazon) sur les 60 derniers.
+// GET ?players=Taylor Fritz,Alexander Zverev&h2h=Taylor Fritz|Alexander Zverev
+//   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
+// v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
+//      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "content-type",
 };
-const cache = new Map<string, { at: number; data: unknown }>();
 const TTL = 6 * 3600 * 1000;
+const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
+const DAY = 86400000;
 
 const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
 const slug = (name: string) => strip(name).replace(/[^A-Za-z]/g, "");
+const norm = (name: string) => strip(name).toLowerCase().replace(/[^a-z]/g, "");
 
-const num = (s: string) => {
-  const v = parseFloat(s.replace("%", ""));
+const pctNum = (s: string) => {
+  const v = parseFloat((s || "").replace("%", ""));
   return isFinite(v) ? v / 100 : null;
 };
+const avg = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
+const nums = (xs: (number | null)[]) => xs.filter((x): x is number => x !== null);
 
 // Probabilité de gagner un jeu de service à partir de la proba de gagner un point
 function holdFromPoint(p: number) {
@@ -37,9 +43,6 @@ function result(cell: string, surname: string): boolean | null {
   if (right.includes(s)) return false;
   return null;
 }
-
-type M = { date: string; surface: string; score: string; ace: number; spw: number; rpw: number | null; win: boolean | null; rank: number | null; opp: string | null; oppRank: number | null; set1: number | null };
-
 // Nom de l'adversaire dans « X d. Y » (sans têtes de série ni pays)
 function opponent(cell: string, win: boolean | null): string | null {
   const t = strip(cell).replace(/\s+/g, " ").trim();
@@ -53,6 +56,44 @@ const expWin = (rk: number, vrk: number) => 1 / (1 + Math.pow(rk / vrk, 0.8));
 // Correction des stats selon la force de l'adversaire : servir face à un top 10 est plus dur que face à un 400e
 const oppAdj = (vrk: number) => 0.015 * Math.log(Math.min(1000, Math.max(1, vrk)) / 100);
 
+const MON: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function parseDate(s: string): number | null {
+  let m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+  if (m && MON[m[2].toLowerCase()] !== undefined) return Date.UTC(+m[3], MON[m[2].toLowerCase()], +m[1]);
+  m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  return null;
+}
+const minutes = (s: string) => {
+  const m = (s || "").match(/^(\d+):(\d{2})$/);
+  return m ? +m[1] * 60 + +m[2] : null;
+};
+// Niveau du tournoi d'après son nom (approximatif)
+function level(name: string): "top" | "tour" | "low" {
+  const n = strip(name).toLowerCase();
+  if (/australian open|roland garros|french open|wimbledon|us open|masters|finals|indian wells|miami|monte carlo|madrid|\brome\b|\broma\b|canada|montreal|toronto|cincinnati|shanghai|paris|beijing|doha|dubai|wuhan/.test(n)) return "top";
+  if (/\bch\b|challenger|\bitf\b|^[mw]\d{2,3}\b|futures|\b125\b/.test(n)) return "low";
+  return "tour";
+}
+// Score du point de vue du joueur : sets, tie-breaks, set décisif, premier set
+function scoreInfo(score: string, win: boolean | null) {
+  if (win === null || /RET|W\/O|DEF|ABD|ABN/i.test(score)) return null;
+  const sets = score.split(/\s+/).map((t) => t.match(/^(\d+)-(\d+)/)).filter(Boolean).map((m) => [+m![1], +m![2]]);
+  if (!sets.length) return null;
+  const own = (s: number[]) => (win ? s[0] > s[1] : s[1] > s[0]); // le score est écrit du point de vue du vainqueur
+  const winnerSets = sets.filter((s) => s[0] > s[1]).length;
+  const decider = (winnerSets === 2 && sets.length === 3) || (winnerSets === 3 && sets.length === 5);
+  const tbs = sets.filter((s) => (s[0] === 7 && s[1] === 6) || (s[0] === 6 && s[1] === 7));
+  return { tbN: tbs.length, tbW: tbs.filter(own).length, decider, firstLost: !own(sets[0]) };
+}
+
+type M = {
+  date: string; d: number | null; tourney: string; lvl: string; surface: string; score: string;
+  ace: number; df: number | null; fi: number; fw: number; sw: number; spw: number; rpw: number | null;
+  bps: number | null; bpf: number | null; mins: number | null;
+  win: boolean | null; rank: number | null; opp: string | null; oppRank: number | null; set1: number | null;
+};
+
 function parse(js: string, surname: string) {
   const body = js.slice(js.indexOf("<tbody>"), js.indexOf("</tbody>"));
   const rows = body.split("<tr>").slice(1);
@@ -60,76 +101,138 @@ function parse(js: string, surname: string) {
   for (const r of rows) {
     const cells = [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim());
     if (cells.length < 15) continue;
-    const [date, , surface, , rk, vrk, match, score, DR, A, , firstIn, firstWon, secondWon] = cells;
-    const a = num(A), fi = num(firstIn), fw = num(firstWon), sw = num(secondWon);
+    const [date, tourney, surface, , rk, vrk, match, score, DR, A, DF, firstIn, firstWon, secondWon, BP, time] = cells;
+    const a = pctNum(A), fi = pctNum(firstIn), fw = pctNum(firstWon), sw = pctNum(secondWon);
     if (a === null || fi === null || fw === null || sw === null) continue;
     const spw = fi * fw + (1 - fi) * sw;
     const dr = parseFloat(DR);
     const rpw = isFinite(dr) && dr > 0 ? Math.min(0.75, Math.max(0.1, dr * (1 - spw))) : null; // DR = retour gagné / service perdu
     const rank = parseInt(rk, 10), oRank = parseInt(vrk, 10);
     const m = score.match(/^(\d+)-(\d+)/);
+    const bp = (BP || "").match(/^(\d+)\/(\d+)$/);
     const win = result(match, surname);
-    out.push({ date, surface, score, ace: a, spw, rpw, win, rank: isFinite(rank) ? rank : null, opp: opponent(match, win), oppRank: isFinite(oRank) ? oRank : (vrk.trim() === "" ? null : 999), set1: m ? +m[1] + +m[2] : null });
-    if (out.length >= 60) break;
+    out.push({
+      date, d: parseDate(date), tourney, lvl: level(tourney), surface, score,
+      ace: a, df: pctNum(DF), fi, fw, sw, spw, rpw,
+      bps: bp ? +bp[1] : null, bpf: bp ? +bp[2] : null, mins: minutes(time || ""),
+      win, rank: isFinite(rank) ? rank : null, opp: opponent(match, win),
+      oppRank: isFinite(oRank) ? oRank : (vrk.trim() === "" ? null : 999), set1: m ? +m[1] + +m[2] : null,
+    });
+    if (out.length >= 150) break;
   }
   return out;
 }
 
-const avg = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
+// ---------- Elo (Tennis Abstract publie une page par circuit)
+type Elo = { tour: string; elo: number | null; hElo: number | null; cElo: number | null; gElo: number | null; eloRank: number | null; age: number | null };
+let eloCache: { at: number; map: Map<string, Elo> } | null = null;
+function parseElo(html: string, tour: string, map: Map<string, Elo>) {
+  const rows = html.split(/<tr[^>]*>/i).slice(1);
+  let idx: Record<string, number> | null = null;
+  for (const r of rows) {
+    const cells = [...r.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) => m[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim());
+    if (!idx) {
+      if (cells.some((c) => /^player$/i.test(c))) {
+        idx = {};
+        cells.forEach((c, i) => { const k = c.toLowerCase().replace(/\s/g, ""); if (idx && !(k in idx)) idx[k] = i; });
+      }
+      continue;
+    }
+    const name = cells[idx.player];
+    if (!name) continue;
+    const n = (k: string) => { const i = idx![k]; if (i === undefined) return null; const v = parseFloat(cells[i]); return isFinite(v) ? v : null; };
+    map.set(norm(name), { tour, elo: n("elo"), hElo: n("helo"), cElo: n("celo"), gElo: n("gelo"), eloRank: n("elorank") ?? n("rank"), age: n("age") });
+  }
+}
+async function elos() {
+  if (eloCache && Date.now() - eloCache.at < TTL) return eloCache.map;
+  const map = new Map<string, Elo>();
+  for (const tour of ["atp", "wta"]) {
+    try {
+      const r = await fetch(`https://tennisabstract.com/reports/${tour}_elo_ratings.html`, UA);
+      if (r.ok) parseElo(await r.text(), tour, map);
+    } catch (_) { /* page indisponible : pas d'Elo */ }
+  }
+  eloCache = { at: Date.now(), map };
+  return map;
+}
 
+// ---------- Main, revers, âge, taille (page joueur)
+async function bio(key: string, tour: string) {
+  try {
+    const r = await fetch(`https://www.tennisabstract.com/cgi-bin/${tour === "wta" ? "w" : ""}player-classic.cgi?p=${key}`, UA);
+    if (!r.ok) return null;
+    const t = await r.text();
+    const g = (re: RegExp) => { const m = t.match(re); return m ? m[1] : null; };
+    const hand = g(/var\s+hand\s*=\s*['"]([LRU])['"]/);
+    const bh = g(/var\s+backhand\s*=\s*['"]?(\d)/);
+    const dob = g(/var\s+dob\s*=\s*['"]?(\d{8})/);
+    const ht = g(/var\s+ht\s*=\s*['"]?(\d{3})/);
+    if (!hand && !dob && !ht) return null;
+    const born = dob ? Date.UTC(+dob.slice(0, 4), +dob.slice(4, 6) - 1, +dob.slice(6, 8)) : null;
+    return { hand, backhand: bh ? +bh : null, age: born ? (Date.now() - born) / (365.25 * DAY) : null, height: ht ? +ht : null };
+  } catch (_) { return null; }
+}
+
+// ---------- Joueur
+const cache = new Map<string, { at: number; data: unknown; rows: M[] }>();
 async function player(name: string) {
   const key = slug(name);
   if (!key || key.length > 60) return null;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL) return hit.data;
-  let data: unknown = null;
+  if (hit && Date.now() - hit.at < TTL) return hit;
+  let data: unknown = null, all: M[] = [];
   try {
-    const r = await fetch(`https://www.tennisabstract.com/jsfrags/${key}.js`, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const eloMap = await elos();
+    const elo = eloMap.get(norm(name)) || null;
+    const [r, b] = await Promise.all([
+      fetch(`https://www.tennisabstract.com/jsfrags/${key}.js`, UA),
+      bio(key, elo ? elo.tour : "atp"),
+    ]);
     if (r.ok) {
       const surname = strip(name.trim().split(/\s+/).pop() || "");
-      const all = parse(await r.text(), surname);
+      all = parse(await r.text(), surname);
       const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
+      const s60 = all.slice(0, 60); // surface, mental, service, niveaux : 60 derniers
       if (ms.length >= 3) {
         const spw = avg(ms.map((m) => m.spw)) as number;
         const ace = avg(ms.map((m) => m.ace)) as number;
-        const rp = ms.map((m) => m.rpw).filter((x): x is number => x !== null);
         const res = ms.map((m) => m.win).filter((x): x is boolean => x !== null);
         const s1 = ms.filter((m) => m.set1 !== null);
-        // Stats corrigées selon le niveau de l'adversaire (adversaire non classé = 500e)
-        const oR = (m: M) => m.oppRank ?? 500;
+        const oR = (m: M) => m.oppRank ?? 500; // adversaire non classé = 500e
         const spwAdj = avg(ms.map((m) => m.spw - oppAdj(oR(m)))) as number;
         const rpwAdj = avg(ms.filter((m) => m.rpw !== null).map((m) => (m.rpw as number) - oppAdj(oR(m))));
-        // Par surface : jusqu'à 60 matchs, pour avoir assez d'échantillon sur terre et gazon
+
+        // Par surface
         const surf: Record<string, Record<string, unknown>> = {};
-        for (const sname of [...new Set(all.map((m) => m.surface).filter(Boolean))]) {
-          const g = all.filter((m) => m.surface === sname);
+        for (const sname of [...new Set(s60.map((m) => m.surface).filter(Boolean))]) {
+          const g = s60.filter((m) => m.surface === sname);
           const g1 = g.filter((m) => m.set1 !== null);
           const gspw = avg(g.map((m) => m.spw)) as number;
           const gr = g.map((m) => m.win).filter((x): x is boolean => x !== null);
           surf[sname] = {
-            n: g.length,
-            spw: gspw,
-            hold: holdFromPoint(gspw),
+            n: g.length, spw: gspw, hold: holdFromPoint(gspw),
             acesPerServiceGame: (avg(g.map((m) => m.ace)) as number) * 6.3,
             set1Over95: g1.length ? g1.filter((m) => (m.set1 as number) >= 10).length / g1.length : null,
             lastDate: g[0].date,
-            rpw: avg(g.map((m) => m.rpw).filter((x): x is number => x !== null)),
+            rpw: avg(nums(g.map((m) => m.rpw))),
             spwAdj: avg(g.map((m) => m.spw - oppAdj(oR(m)))) as number,
             rpwAdj: avg(g.filter((m) => m.rpw !== null).map((m) => (m.rpw as number) - oppAdj(oR(m)))),
-            wins: gr.filter(Boolean).length,
-            known: gr.length,
+            wins: gr.filter(Boolean).length, known: gr.length,
           };
         }
+
+        // Qualité des résultats : victoires pondérées par le classement de l'adversaire
         const rank = ms.find((m) => m.rank !== null)?.rank ?? null;
-        // Qualité des résultats : victoires et défaites pondérées par le classement de l'adversaire
         const q = ms.filter((m) => m.win !== null);
         let sw = 0, sp = 0, expW = 0, i = 0;
         let vsBetterW = 0, vsBetterN = 0, top50W = 0, top50N = 0, weakW = 0, badL = 0;
         let best: { rank: number; name: string | null } | null = null;
-        const oppRanks: number[] = [];
+        const oppRanks: number[] = [], resid: number[] = [];
         for (const m of q) {
           const own = m.rank ?? rank ?? 300, vr = oR(m), e = expWin(own, vr), w = Math.pow(0.93, i++);
-          sw += w; sp += w * ((m.win ? 1 : 0) - e); expW += e; oppRanks.push(vr);
+          const rs = (m.win ? 1 : 0) - e;
+          sw += w; sp += w * rs; expW += e; oppRanks.push(vr); resid.push(rs);
           if (vr < own) { vsBetterN++; if (m.win) vsBetterW++; }
           if (vr <= 50) { top50N++; if (m.win) top50W++; }
           if (m.win && vr > Math.max(100, own * 1.5)) weakW++;
@@ -138,41 +241,84 @@ async function player(name: string) {
         }
         oppRanks.sort((x, y) => x - y);
         const quality = q.length >= 5 ? {
-          perf: sp / sw,                        // > 0 : gagne plus que son classement ne le prévoit, adversaires pris en compte
+          perf: sp / sw, // > 0 : gagne plus que son classement ne le prévoit, adversaires pris en compte
           expWins: expW, wins: q.filter((m) => m.win).length, n: q.length,
-          vsBetter: { w: vsBetterW, n: vsBetterN },
-          top50: { w: top50W, n: top50N },
+          vsBetter: { w: vsBetterW, n: vsBetterN }, top50: { w: top50W, n: top50N },
           weakWins: weakW, badLosses: badL,
-          medianOpp: oppRanks[Math.floor(oppRanks.length / 2)],
-          bestWin: best,
+          medianOpp: oppRanks[Math.floor(oppRanks.length / 2)], bestWin: best,
+          perf5: avg(resid.slice(0, 5)), perf20: avg(resid), // tendance
         } : null;
+
+        // Fatigue et inactivité (dates = début du tournoi chez Tennis Abstract)
+        const now = Date.now(), d0 = ms[0].d;
+        const rec = ms.filter((m) => m.d !== null && now - (m.d as number) <= 14 * DAY);
+        const fatigue = {
+          days: d0 !== null ? Math.max(0, Math.round((now - d0) / DAY)) : null,
+          n14: rec.length,
+          min14: rec.some((m) => m.mins !== null) ? nums(rec.map((m) => m.mins)).reduce((s, x) => s + x, 0) : null,
+          lastMin: ms[0].mins,
+        };
+
+        // Mental : balles de break, tie-breaks, sets décisifs, remontées
+        let bps = 0, bpf = 0, tbW = 0, tbN = 0, decW = 0, decN = 0, cbW = 0, cbN = 0;
+        for (const m of s60) {
+          if (m.bps !== null && m.bpf !== null) { bps += m.bps; bpf += m.bpf; }
+          const si = scoreInfo(m.score, m.win);
+          if (!si) continue;
+          tbW += si.tbW; tbN += si.tbN;
+          if (si.decider) { decN++; if (m.win) decW++; }
+          if (si.firstLost) { cbN++; if (m.win) cbW++; }
+        }
+        const clutch = { bpSaved: bps, bpFaced: bpf, tbW, tbN, decW, decN, comebackW: cbW, comebackN: cbN };
+
+        // Détail du service
+        const serve = {
+          firstIn: avg(s60.map((m) => m.fi)), firstWon: avg(s60.map((m) => m.fw)),
+          secondWon: avg(s60.map((m) => m.sw)), df: avg(nums(s60.map((m) => m.df))),
+        };
+
+        // Résultats par niveau de tournoi
+        const levels: Record<string, { w: number; n: number }> = { top: { w: 0, n: 0 }, tour: { w: 0, n: 0 }, low: { w: 0, n: 0 } };
+        for (const m of s60) if (m.win !== null) { levels[m.lvl].n++; if (m.win) levels[m.lvl].w++; }
+
         data = {
-          matches: ms.length,
-          lastDate: ms[0].date,
-          lastSurface: ms[0].surface || null,
-          spw,
-          hold: holdFromPoint(spw),
-          rpw: avg(rp),
-          spwAdj,
-          rpwAdj,
-          quality,
-          acePct: ace,
-          acesPerServiceGame: ace * 6.3,
-          rank,
-          wins: res.filter(Boolean).length,
-          results: res.length,
+          matches: ms.length, lastDate: ms[0].date, lastSurface: ms[0].surface || null,
+          spw, hold: holdFromPoint(spw), rpw: avg(nums(ms.map((m) => m.rpw))), spwAdj, rpwAdj, quality,
+          acePct: ace, acesPerServiceGame: ace * 6.3, rank,
+          wins: res.filter(Boolean).length, results: res.length,
           winRate: res.length >= 5 ? res.filter(Boolean).length / res.length : null,
           form: ms.slice(0, 5).map((m) => (m.win === true ? "V" : m.win === false ? "D" : "?")).join(""),
-          surf,
+          surf, fatigue, clutch, serve, levels,
+          elo, bio: b,
           set1Over95: s1.length ? s1.filter((m) => (m.set1 as number) >= 10).length / s1.length : null,
           set1Sample: s1.length,
         };
       }
     }
   } catch (_) { data = null; }
-  cache.set(key, { at: Date.now(), data });
-  return data;
+  const entry = { at: Date.now(), data, rows: all };
+  cache.set(key, entry);
+  return entry;
 }
+
+// ---------- Face-à-face, d'après l'historique d'un des deux joueurs
+function sameName(opp: string, target: string) {
+  const o = norm(opp), t = norm(target), last = norm(target.trim().split(/\s+/).pop() || "");
+  return o === t || (!!last && o.endsWith(last) && o[0] === t[0]);
+}
+function h2hFrom(rows: M[], other: string) {
+  const ms = rows.filter((m) => m.opp && m.win !== null && sameName(m.opp, other));
+  if (!ms.length) return { a: 0, b: 0, n: 0, surf: {}, last: null };
+  const surf: Record<string, { a: number; b: number }> = {};
+  for (const m of ms) { const s = (surf[m.surface] = surf[m.surface] || { a: 0, b: 0 }); m.win ? s.a++ : s.b++; }
+  const l = ms[0];
+  return { a: ms.filter((m) => m.win).length, b: ms.filter((m) => !m.win).length, n: ms.length, surf, last: { date: l.date, aWon: l.win, surface: l.surface, score: l.score, tourney: l.tourney } };
+}
+const flip = (h: ReturnType<typeof h2hFrom>) => ({
+  a: h.b, b: h.a, n: h.n,
+  surf: Object.fromEntries(Object.entries(h.surf).map(([k, v]) => [k, { a: v.b, b: v.a }])),
+  last: h.last ? { ...h.last, aWon: !h.last.aWon } : null,
+});
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -182,12 +328,21 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "Paramètre players manquant" }), { status: 400, headers: { ...CORS, "Content-Type": "application/json" } });
   }
   const res: Record<string, unknown> = {};
-  for (let i = 0; i < names.length; i += 6) {
-    const part = names.slice(i, i + 6);
+  const rows: Record<string, M[]> = {};
+  await elos();
+  for (let i = 0; i < names.length; i += 8) {
+    const part = names.slice(i, i + 8);
     const got = await Promise.all(part.map(player));
-    part.forEach((n, j) => (res[n] = got[j]));
+    part.forEach((n, j) => { res[n] = got[j] ? got[j]!.data : null; rows[n] = got[j] ? got[j]!.rows : []; });
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 4, players: res }), {
+  const h2h: Record<string, unknown> = {};
+  for (const pair of (url.searchParams.get("h2h") || "").split(";").slice(0, 60)) {
+    const [a, b] = pair.split("|").map((s) => s && s.trim());
+    if (!a || !b) continue;
+    if (rows[a] && rows[a].length) h2h[a + "|" + b] = h2hFrom(rows[a], b);
+    else if (rows[b] && rows[b].length) h2h[a + "|" + b] = flip(h2hFrom(rows[b], a));
+  }
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 5, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });

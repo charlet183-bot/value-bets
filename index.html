@@ -129,6 +129,10 @@ details summary{cursor:pointer;font-weight:600}
 .cmp td.best{color:var(--clay);font-weight:700}
 .cmp thead td{font:600 13px/1.2 var(--f-body);border-top:0}
 .form{letter-spacing:.12em}
+.allstats>summary{margin-bottom:4px}
+.grp{border-top:1px solid var(--line);padding:6px 0}
+.grp>summary{font:700 14px/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.05em;color:var(--clay);padding:4px 0}
+.cmp small{color:var(--muted);font-weight:400}
 @media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -184,9 +188,11 @@ details summary{cursor:pointer;font-weight:600}
     <details class="panel">
       <summary>Comment le gagnant est calculé</summary>
       <p class="note">1. Service contre retour : le % de points gagnés au service de A, corrigé par la qualité de retour de B (et inversement), donne la chance de gagner chaque point. On en déduit jeux, tie-breaks, sets et match (3 sets gagnants en Grand Chelem masculin).</p>
+      <p class="note">Base : Elo par surface (Tennis Abstract), la meilleure mesure du niveau réel d'un joueur, elle compte pour près de la moitié du % stats.</p>
       <p class="note">2. Qualité des adversaires : chaque match passé est pesé selon le classement de l'adversaire. Battre un top 20 compte beaucoup, enchaîner des victoires contre des 300e compte peu. Les stats de service et de retour sont aussi corrigées (servir face à un top 10 est plus dur). La forme mesure les victoires au-dessus de ce que le classement des adversaires laissait prévoir, les matchs récents pesant plus.</p>
       <p class="note">3. Avis combiné : 65 % Pinnacle, 35 % stats. Pinnacle reste la meilleure estimation disponible ; les stats servent surtout à repérer quand le marché semble se tromper. Un pari n'est proposé que si la meilleure cote française bat cet avis combiné.</p>
-      <p class="note">Le modèle ne voit ni les blessures, ni la fatigue, ni les confrontations directes. Même un favori à 75 % perd un match sur quatre.</p>
+      <p class="note">4. Ajustements : petit malus de fatigue (beaucoup de matchs en 2 semaines, long dernier match) ou de reprise (plus d'un mois sans tournoi), léger bonus de face-à-face à partir de 3 matchs entre eux. Les rubriques Mental, Service et Niveau des tournois sont affichées pour ton jugement mais ne changent pas le %.</p>
+      <p class="note">Le modèle ne voit pas les blessures annoncées ni la forme du jour. Même un favori à 75 % perd un match sur quatre.</p>
     </details>
   </section>
 
@@ -539,7 +545,7 @@ $("c-run").onclick=runComp;
 const SURF={Hard:"dur",Clay:"terre battue",Grass:"gazon"};
 const MIN_SURF=3;
 // Réponse d'une ancienne version du relais (sans stats par surface sur 60 matchs) : à redemander
-const isOld=P=>!!P&&(P.quality===undefined||!Object.values(P.surf||{}).some(g=>g&&g.hold!=null)); // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
+const isOld=P=>!!P&&P.clutch===undefined; // avant la v5 du relais // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
 let compSurf=store.get("vbt_csurf","all");
 function surfButtons(box,cur,withAuto,onPick){
   const opts=[[withAuto?"auto":"all",withAuto?"Auto":"Toutes"],["Hard","Dur"],["Clay","Terre battue"],["Grass","Gazon"]];
@@ -597,12 +603,21 @@ function setDist(ha,hb){
 const pOverOf=(dist,L)=>dist.reduce((s,v,g)=>s+(g>L?v:0),0);
 // Stats de service réelles (Tennis Abstract, via le relais Supabase)
 const statCache={};
-async function fetchStats(names){
+const h2hCache={};
+const pairKey=p=>p[0]+"|"+p[1];
+// Le relais calcule aussi le face-à-face d'une paire si l'un des deux joueurs est dans la même requête
+async function fetchStats(names,pairs){
   const need=[...new Set(names)].filter(n=>!(n in statCache));
-  for(let i=0;i<need.length;i+=30){
-    const part=need.slice(i,i+30);
-    try{const r=await fetch(STATS+"?players="+encodeURIComponent(part.join(",")));
-      if(r.ok){const j=await r.json();part.forEach(n=>statCache[n]=j.players?j.players[n]||null:null)}}catch(e){}
+  let todo=(pairs||[]).filter(p=>!(pairKey(p) in h2hCache));
+  const extra=todo.filter(p=>!need.includes(p[0])&&!need.includes(p[1])).map(p=>p[0]);
+  const ask=[...new Set([...need,...extra])];
+  for(let i=0;i<ask.length;i+=30){
+    const part=ask.slice(i,i+30),set=new Set(part);
+    const pp=todo.filter(p=>set.has(p[0])||set.has(p[1]));todo=todo.filter(p=>!pp.includes(p));
+    try{const r=await fetch(STATS+"?players="+encodeURIComponent(part.join(","))+(pp.length?"&h2h="+encodeURIComponent(pp.map(p=>p.join("|")).join(";")):""));
+      if(r.ok){const j=await r.json();
+        part.forEach(n=>{if(need.includes(n)||!statCache[n])statCache[n]=j.players?j.players[n]||null:null});
+        pp.forEach(p=>{h2hCache[pairKey(p)]=j.h2h&&j.h2h[pairKey(p)]||null})}}catch(e){}
   }
   return statCache;
 }
@@ -757,7 +772,20 @@ function blendStat(P,surf,k){
   if(!s||s[k]==null||s.n<MIN_SURF)return base;
   return (s.n*s[k]+6*base)/(s.n+6);
 }
-function statModel(A,B,wta,bo5){
+const ELO_K={Hard:"hElo",Clay:"cElo",Grass:"gElo"};
+// Elo du joueur sur la surface (moyenne Elo général / Elo surface, comme Tennis Abstract)
+function eloOn(P,surf){const e=P&&P.elo;if(!e||e.elo==null)return null;const x=surf&&e[ELO_K[surf]];return x!=null?(e.elo+x)/2:e.elo}
+const dur=m=>`${Math.floor(m/60)} h ${String(m%60).padStart(2,"0")}`;
+// Malus de fatigue ou de reprise (en logit) : beaucoup de matchs récents, long dernier match, longue absence
+function fatiguePen(P){
+  const f=P&&P.fatigue,why=[];let v=0;if(!f)return{v,why};
+  if(f.n14>4){v+=.05*(f.n14-4);why.push(`${f.n14} matchs en 2 semaines`)}
+  if(f.lastMin>=160){v+=.08;why.push(`dernier match de ${dur(f.lastMin)}`)}
+  if(f.days!=null&&f.days>60){v+=.25;why.push(`aucun tournoi depuis ${f.days} jours (reprise ?)`)}
+  else if(f.days!=null&&f.days>35){v+=.12;why.push(`aucun tournoi depuis ${f.days} jours`)}
+  return{v,why};
+}
+function statModel(A,B,wta,bo5,h){
   const surf=pickSurf(A,B),avgS=wta?.56:.64;
   const sA=blendStat(A,surf,"spw"),sB=blendStat(B,surf,"spw");
   const rA=blendStat(A,surf,"rpw")??(1-avgS),rB=blendStat(B,surf,"rpw")??(1-avgS);
@@ -768,9 +796,17 @@ function statModel(A,B,wta,bo5){
   let pForm=null;
   if(A.quality&&B.quality)pForm=1/(1+Math.exp(-3*(A.quality.perf-B.quality.perf))); // forme pondérée par la force des adversaires
   else if(A.results>=5&&B.results>=5){const a=(A.wins+2)/(A.results+4),b=(B.wins+2)/(B.results+4);pForm=a*(1-b)/(a*(1-b)+b*(1-a))}
-  const parts=[[pServe,.6]];if(pRank!=null)parts.push([pRank,.2]);if(pForm!=null)parts.push([pForm,.2]);
-  const ws=parts.reduce((s,[,w])=>s+w,0);
-  return {p:unlogit(parts.reduce((s,[p,w])=>s+logit(p)*w,0)/ws),pServe,pRank,pForm,ha,hb,surf,sA,sB,rA,rB};
+  const eA=eloOn(A,surf),eB=eloOn(B,surf);
+  let pElo=eA!=null&&eB!=null?1/(1+Math.pow(10,(eB-eA)/400)):null;
+  if(pElo!=null&&bo5)pElo=unlogit(logit(pElo)*1.25); // en 5 sets, le plus fort gagne plus souvent
+  // Elo = base du calcul ; sans Elo, le classement le remplace
+  const parts=pElo!=null?[[pElo,.45],[pServe,.35]]:[[pServe,.6]];
+  if(pElo==null&&pRank!=null)parts.push([pRank,.2]);
+  if(pForm!=null)parts.push([pForm,.2]);
+  const ws=parts.reduce((t,[,w])=>t+w,0),base=parts.reduce((t,[p,w])=>t+logit(p)*w,0)/ws;
+  const fA=fatiguePen(A),fB=fatiguePen(B),adjFat=fB.v-fA.v;
+  const adjH2h=h&&h.n>=3?.3*(h.a-h.b)/h.n:0; // léger bonus, seulement à partir de 3 matchs entre eux
+  return {p:unlogit(base+adjFat+adjH2h),pBase:unlogit(base),pElo,eA,eB,pServe,pRank,pForm,adjFat,adjH2h,fA,fB,ha,hb,surf,sA,sB,rA,rB};
 }
 function analyseWinners(events,minEdge){
   const out=[];
@@ -781,7 +817,8 @@ function analyseWinners(events,minEdge){
     const a=oa.name,b=ob.name,A=statCache[a],B=statCache[b];
     const wta=/WTA/i.test(ev.sport_title+" "+ev.sport_key);
     const bo5=!wta&&/australian open|french open|roland|wimbledon|us open/i.test(ev.sport_title||"");
-    const st=A&&B&&A.spw!=null&&B.spw!=null?statModel(A,B,wta,bo5):null;
+    const h2h=h2hCache[a+"|"+b]||null;
+    const st=A&&B&&A.spw!=null&&B.spw!=null?statModel(A,B,wta,bo5,h2h):null;
     const pFin=st?unlogit(.65*logit(pPin)+.35*logit(st.p)):pPin;
     const best=[null,null];
     for(const bk of books){
@@ -793,7 +830,7 @@ function analyseWinners(events,minEdge){
     const val=sides.filter(s=>s&&s.edge>=minEdge).sort((x,y)=>y.edge-x.edge)[0]||null;
     const w=pFin>=.5?0:1;
     const agree=st?((st.p>=.5)===(pPin>=.5)):null;
-    out.push({tour:ev.sport_title,start:ev.commence_time,a,b,A,B,pPin,st,pFin,w,pW:probs[w],sides,val,agree,bo5});
+    out.push({tour:ev.sport_title,start:ev.commence_time,a,b,A,B,pPin,st,pFin,w,pW:probs[w],sides,val,agree,bo5,h2h});
   }
   return out;
 }
@@ -805,35 +842,75 @@ function sortWin(list){
 }
 const surn=n=>esc(n.split(" ").pop());
 function sbar(lab,p,a,b){return `<span class="lab">${lab}</span><div class="sbar" title="${esc(a)} ${pct(p)} · ${esc(b)} ${pct(1-p)}"><i style="width:${Math.max(4,p*100)}%">${Math.round(p*100)}</i><span>${Math.round((1-p)*100)}</span></div>`}
+const ratio=o=>o&&o.n?o.w/o.n:null;
+const frac=(w,n)=>n?`${w}/${n} <small>${pct(w/n)}</small>`:"–";
+const handOf=P=>{const b=P.bio;if(!b||!b.hand||b.hand==="U")return null;return (b.hand==="L"?"Gaucher":"Droitier")+(b.backhand?`<br><small>revers ${b.backhand===1?"à 1 main":"à 2 mains"}</small>`:"")};
+const ageOf=P=>P.bio&&P.bio.age!=null?P.bio.age:P.elo&&P.elo.age!=null?P.elo.age:null;
+function trendOf(q){if(!q||q.perf5==null||q.perf20==null)return null;return q.perf5-q.perf20}
 function cmpTable(m){
   const A=m.A,B=m.B;if(!A||!B)return"";
-  const qa=A.quality,qb=B.quality;
-  const rows=[
-    ["Classement",A.rank,B.rank,v=>v?"#"+v:"–",-1],
-    ...["Hard","Clay","Grass"].map(sf=>{
-      const ga=A.surf&&A.surf[sf],gb=B.surf&&B.surf[sf],cur=m.st&&m.st.surf===sf;
+  const qa=A.quality,qb=B.quality,st=m.st,sf=st&&st.surf,fa=A.fatigue||{},fb=B.fatigue||{},ca=A.clutch,cb=B.clutch,sa=A.serve||{},sb=B.serve||{};
+  const num0=v=>v==null?"–":Math.round(v);
+  const groups=[
+    ["Niveau",[
+      ["Elo"+(sf?" sur "+SURF[sf]:""),st?st.eA:eloOn(A),st?st.eB:eloOn(B),num0,1],
+      ["Elo toutes surfaces",A.elo&&A.elo.elo,B.elo&&B.elo.elo,num0,1],
+      ["Classement",A.rank,B.rank,v=>v?"#"+v:"–",-1],
+      ["Âge",ageOf(A),ageOf(B),v=>v==null?"–":Math.floor(v)+" ans",0],
+      ["Main",handOf(A),handOf(B),v=>v||"–",0],
+      ["Taille",A.bio&&A.bio.height,B.bio&&B.bio.height,v=>v?v+" cm":"–",0],
+    ]],
+    ["Forme",[
+      ["5 derniers matchs",A.form,B.form,v=>v?`<span class="form">${esc(v)}</span>`:"–",0],
+      ["Tendance (5 derniers vs 20)",trendOf(qa),trendOf(qb),v=>v==null?"–":v>.1?"↑ en progrès":v<-.1?"↓ en baisse":"= stable",1],
+      ["Victoires (attendues selon les adversaires)",qa?qa.wins-qa.expWins:null,qb?qb.wins-qb.expWins:null,(v,P)=>P.quality?`${P.quality.wins}/${P.quality.n} <small>(${P.quality.expWins.toFixed(1).replace(".",",")})</small>`:P.results?`${P.wins}/${P.results}`:"–",1],
+      ["Contre mieux classés",ratio(qa&&qa.vsBetter),ratio(qb&&qb.vsBetter),(v,P)=>P.quality?frac(P.quality.vsBetter.w,P.quality.vsBetter.n):"–",1],
+      ["Contre le top 50",ratio(qa&&qa.top50),ratio(qb&&qb.top50),(v,P)=>P.quality?frac(P.quality.top50.w,P.quality.top50.n):"–",1],
+      ["Meilleure victoire",qa&&qa.bestWin?qa.bestWin.rank:null,qb&&qb.bestWin?qb.bestWin.rank:null,(v,P)=>v==null?"–":`#${v}${P.quality.bestWin.name?" <small>"+esc(P.quality.bestWin.name.split(" ").pop())+"</small>":""}`,-1],
+      ["Rang médian des adversaires",qa?qa.medianOpp:null,qb?qb.medianOpp:null,v=>v==null?"–":"#"+v,-1],
+      ["Défaites surprises",qa?qa.badLosses:null,qb?qb.badLosses:null,v=>v==null?"–":v,-1],
+      ["Grand Chelem / Masters",ratio(A.levels&&A.levels.top),ratio(B.levels&&B.levels.top),(v,P)=>P.levels?frac(P.levels.top.w,P.levels.top.n):"–",1],
+      ["Autres tournois ATP / WTA",ratio(A.levels&&A.levels.tour),ratio(B.levels&&B.levels.tour),(v,P)=>P.levels?frac(P.levels.tour.w,P.levels.tour.n):"–",1],
+      ["Challenger / ITF",ratio(A.levels&&A.levels.low),ratio(B.levels&&B.levels.low),(v,P)=>P.levels?frac(P.levels.low.w,P.levels.low.n):"–",1],
+    ]],
+    ["Fatigue",[
+      ["Matchs ces 2 semaines",fa.n14,fb.n14,v=>v==null?"–":v,-1],
+      ["Temps de jeu ces 2 semaines",fa.min14,fb.min14,v=>v==null?"–":dur(v),-1],
+      ["Durée du dernier match",fa.lastMin,fb.lastMin,v=>v==null?"–":dur(v),-1],
+      ["Début du dernier tournoi",fa.days,fb.days,v=>v==null?"–":v<=7?"cette semaine":`il y a ${v} j`,0],
+    ]],
+    ["Surface",["Hard","Clay","Grass"].map(x=>{
       const r=g=>g&&g.known?g.wins/g.known:null;
-      const f=(v,P)=>{const g=P.surf&&P.surf[sf];if(!g)return"–";const h=g.hold!=null?g.hold:holdP(g.spw);return`${g.known?g.wins+"/"+g.known:g.n+" m."}<br><small>srv ${pct(h)}</small>`};
-      return [(cur?"▸ ":"")+"Sur "+SURF[sf],r(ga),r(gb),f,1];
-    }),
-    ["Forme (5 derniers)",A.form,B.form,v=>v?`<span class="form">${esc(v)}</span>`:"–",0],
-    ["Victoires (attendues selon les adversaires)",qa?qa.wins-qa.expWins:null,qb?qb.wins-qb.expWins:null,(v,P)=>P.quality?`${P.quality.wins}/${P.quality.n} <small>(${P.quality.expWins.toFixed(1).replace(".",",")})</small>`:P.results?`${P.wins}/${P.results}`:"–",1],
-    ["Contre mieux classés",qa&&qa.vsBetter.n?qa.vsBetter.w/qa.vsBetter.n:null,qb&&qb.vsBetter.n?qb.vsBetter.w/qb.vsBetter.n:null,(v,P)=>P.quality?`${P.quality.vsBetter.w}/${P.quality.vsBetter.n}`:"–",1],
-    ["Contre le top 50",qa&&qa.top50.n?qa.top50.w/qa.top50.n:null,qb&&qb.top50.n?qb.top50.w/qb.top50.n:null,(v,P)=>P.quality?`${P.quality.top50.w}/${P.quality.top50.n}`:"–",1],
-    ["Meilleure victoire",qa&&qa.bestWin?qa.bestWin.rank:null,qb&&qb.bestWin?qb.bestWin.rank:null,(v,P)=>v==null?"–":`#${v}${P.quality.bestWin.name?" <small>"+esc(P.quality.bestWin.name.split(" ").pop())+"</small>":""}`,-1],
-    ["Rang médian des adversaires",qa?qa.medianOpp:null,qb?qb.medianOpp:null,v=>v==null?"–":"#"+v,-1],
-    ["Défaites surprises",qa?qa.badLosses:null,qb?qb.badLosses:null,v=>v==null?"–":v,-1],
-    ["Points gagnés au service",m.st?m.st.sA:A.spw,m.st?m.st.sB:B.spw,v=>v==null?"–":pct(v),1],
-    ["Points gagnés au retour",m.st?m.st.rA:A.rpw,m.st?m.st.rB:B.rpw,v=>v==null?"–":pct(v),1],
-    ["Jeux de service gagnés",m.st?m.st.ha:A.hold,m.st?m.st.hb:B.hold,v=>v==null?"–":pct(v),1],
-    ["Aces par jeu de service",A.acesPerServiceGame,B.acesPerServiceGame,v=>v==null?"–":v.toFixed(2).replace(".",","),1]
+      const f=(v,P)=>{const g=P.surf&&P.surf[x];if(!g)return"–";const hh=g.hold!=null?g.hold:holdP(g.spw);return`${g.known?g.wins+"/"+g.known:g.n+" m."}<br><small>service ${pct(hh)}</small>`};
+      return [(sf===x?"▸ ":"")+"Sur "+SURF[x],r(A.surf&&A.surf[x]),r(B.surf&&B.surf[x]),f,1];
+    })],
+    ["Service et retour",[
+      ["Points gagnés au service",st?st.sA:A.spw,st?st.sB:B.spw,v=>v==null?"–":pct(v),1],
+      ["Points gagnés au retour",st?st.rA:A.rpw,st?st.rB:B.rpw,v=>v==null?"–":pct(v),1],
+      ["Jeux de service gagnés",st?st.ha:A.hold,st?st.hb:B.hold,v=>v==null?"–":pct(v),1],
+      ["Aces par jeu de service",A.acesPerServiceGame,B.acesPerServiceGame,v=>v==null?"–":v.toFixed(2).replace(".",","),1],
+      ["1res balles passées",sa.firstIn,sb.firstIn,v=>v==null?"–":pct(v),1],
+      ["Points gagnés sur 1re balle",sa.firstWon,sb.firstWon,v=>v==null?"–":pct(v),1],
+      ["Points gagnés sur 2e balle",sa.secondWon,sb.secondWon,v=>v==null?"–":pct(v),1],
+      ["Doubles fautes",sa.df,sb.df,v=>v==null?"–":pct(v),-1],
+    ]],
+    ["Mental",[
+      ["Balles de break sauvées",ca&&ca.bpFaced?ca.bpSaved/ca.bpFaced:null,cb&&cb.bpFaced?cb.bpSaved/cb.bpFaced:null,(v,P)=>P.clutch?frac(P.clutch.bpSaved,P.clutch.bpFaced):"–",1],
+      ["Tie-breaks gagnés",ca&&ca.tbN?ca.tbW/ca.tbN:null,cb&&cb.tbN?cb.tbW/cb.tbN:null,(v,P)=>P.clutch?frac(P.clutch.tbW,P.clutch.tbN):"–",1],
+      ["Sets décisifs gagnés",ca&&ca.decN?ca.decW/ca.decN:null,cb&&cb.decN?cb.decW/cb.decN:null,(v,P)=>P.clutch?frac(P.clutch.decW,P.clutch.decN):"–",1],
+      ["Victoires après 1er set perdu",ca&&ca.comebackN?ca.comebackW/ca.comebackN:null,cb&&cb.comebackN?cb.comebackW/cb.comebackN:null,(v,P)=>P.clutch?frac(P.clutch.comebackW,P.clutch.comebackN):"–",1],
+    ]],
   ];
-  const tr=rows.map(([lab,va,vb,fmt,dir])=>{
-    let ca="",cb="";
-    if(dir&&va!=null&&vb!=null&&va!==vb){const aBetter=dir>0?va>vb:va<vb;if(aBetter)ca="best";else cb="best"}
-    return `<tr><td class="${ca}">${fmt(va,A)}</td><th>${lab}</th><td class="${cb}">${fmt(vb,B)}</td></tr>`}).join("");
-  return `<details><summary>Comparer toutes les stats</summary><table class="cmp"><thead><tr><td>${surn(m.a)}</td><td></td><td>${surn(m.b)}</td></tr></thead><tbody>${tr}</tbody></table>
-    <p class="note" style="margin:6px 0 0">Par surface : victoires et jeux de service gagnés sur les 60 derniers matchs, ▸ = surface utilisée pour ce match. Entre parenthèses : victoires qu'il aurait dû avoir d'après le classement de ses adversaires. Sur les 20 derniers matchs${m.st&&m.st.surf?", pondéré vers la surface "+esc(m.st.surf==="Hard"?"dur":m.st.surf==="Clay"?"terre battue":m.st.surf==="Grass"?"gazon":m.st.surf):""}. Service et retour ajustés à l'adversaire.</p></details>`;
+  const head=`<thead><tr><td>${surn(m.a)}</td><td></td><td>${surn(m.b)}</td></tr></thead>`;
+  const html=groups.map(([title,rows],gi)=>`<details class="grp"${gi===0?" open":""}><summary>${title}</summary><table class="cmp">${head}<tbody>${rows.map(([lab,va,vb,fmt,dir])=>{
+    let c1="",c2="";
+    if(dir&&va!=null&&vb!=null&&va!==vb){if(dir>0?va>vb:va<vb)c1="best";else c2="best"}
+    return `<tr><td class="${c1}">${fmt(va,A)}</td><th>${lab}</th><td class="${c2}">${fmt(vb,B)}</td></tr>`}).join("")}</tbody></table></details>`).join("");
+  const h=m.h2h;
+  const h2hHtml=h&&h.n?`<p class="note" style="margin:4px 0">${surn(m.a)} <b class="num">${h.a}–${h.b}</b> ${surn(m.b)}${Object.keys(h.surf||{}).length?" · "+Object.entries(h.surf).map(([k,v])=>`${SURF[k]||esc(k)} ${v.a}–${v.b}`).join(" · "):""}${h.last?`<br>Dernier match : victoire de ${h.last.aWon?surn(m.a):surn(m.b)} (${esc(h.last.tourney||"")}, ${esc(h.last.score||"")})`:""}</p>`
+    :`<p class="note" style="margin:4px 0">${h?"Aucun match entre eux dans l'historique récent.":"Face-à-face pas encore disponible : relance l'analyse."}</p>`;
+  return `<details class="allstats"><summary>Comparer toutes les stats</summary>${html}<details class="grp"><summary>Face-à-face</summary>${h2hHtml}</details>
+    <p class="note" style="margin:6px 0 0">En orange : le meilleur des deux. Forme et service sur les 20 derniers matchs, surface, mental et niveaux sur les 60 derniers. ▸ = surface utilisée. Entre parenthèses : victoires attendues d'après le classement des adversaires. Dates de fatigue : début de tournoi.</p></details>`;
 }
 // Signaux sur la qualité des résultats récents
 function alerts(m){
@@ -845,7 +922,26 @@ function alerts(m){
     else if(q.vsBetter.n>=3&&q.vsBetter.w/q.vsBetter.n>=.6)out.push(`★ ${nm} gagne ${q.vsBetter.w} fois sur ${q.vsBetter.n} contre des joueurs mieux classés que lui.`);
     if(q.badLosses>=3)out.push(`⚠ ${nm} a perdu ${q.badLosses} fois contre des joueurs bien moins bien classés.`);
   }
+  for(const [n,P] of [[m.a,m.A],[m.b,m.B]]){
+    if(!P)continue;const nm=surn(n),f=fatiguePen(P);
+    if(f.v>=.08)out.push(`⚠ ${nm} : ${f.why.join(", ")}.`);
+    if(P.bio&&P.bio.hand==="L")out.push(`ℹ ${nm} est gaucher.`);
+  }
+  const h=m.h2h;
+  if(h&&h.n>=3)out.push(`ℹ Face-à-face : ${h.a===h.b?`égalité ${h.a}–${h.b}`:`${h.a>h.b?surn(m.a):surn(m.b)} mène ${Math.max(h.a,h.b)}–${Math.min(h.a,h.b)}`}.`);
   return out.length?`<div class="note">${out.join("<br>")}</div>`:"";
+}
+// Détail du % « Stats » : chaque morceau, puis les ajustements fatigue et face-à-face
+function breakdown(m){
+  const s=m.st;if(!s)return"";
+  const parts=[];
+  if(s.pElo!=null)parts.push(`Elo ${pct(s.pElo)}`);
+  parts.push(`service/retour ${pct(s.pServe)}`);
+  if(s.pElo==null&&s.pRank!=null)parts.push(`classement ${pct(s.pRank)}`);
+  if(s.pForm!=null)parts.push(`forme ${pct(s.pForm)}`);
+  const adj=(x,lab)=>{const d=Math.round((unlogit(logit(s.pBase)+x)-s.pBase)*100);return d?`${lab} +${Math.abs(d)} pt${Math.abs(d)>1?"s":""} pour ${d>0?surn(m.a):surn(m.b)}`:""};
+  const extra=[adj(s.adjFat,"fatigue"),adj(s.adjH2h,"face-à-face")].filter(Boolean);
+  return `<p class="note" style="margin:0">Stats pour ${surn(m.a)} : ${parts.join(" · ")}${extra.length?" · "+extra.join(" · "):""}</p>`;
 }
 function renderWin(list){
   const r=$("results-win");
@@ -861,7 +957,7 @@ function renderWin(list){
     return `<div class="match${m.val?" hit":""}"><div class="mhead"><span>${esc(m.tour)}${m.bo5?" · 5 sets":""}</span><span>${when}</span></div>
       <div class="players">${esc(m.a)} – ${esc(m.b)}</div>
       <div class="pick"><div><div class="label">Gagnant probable</div><b>${esc(wn)}</b></div><div style="text-align:right">${tag}<div class="big">${pct(m.pW)}</div></div></div>
-      ${bars}${alerts(m)}${val}${cmpTable(m)}</div>`}).join("");
+      ${bars}${breakdown(m)}${alerts(m)}${val}${cmpTable(m)}</div>`}).join("");
   r.querySelectorAll("button[data-w]").forEach(btn=>btn.onclick=()=>{const m=list[btn.dataset.w],v=m.val;openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:v.player,book:v.book,price:v.price,p:v.p,demo:false,cat:"gagnant",link:v.link,copy:surname(v.player)})});
 }
 async function runWinners(){
@@ -884,18 +980,20 @@ async function runWinners(){
     }
     all=future(all);
     const names=all.flatMap(e=>{const sh=(e.bookmakers||[]).find(b=>b.key===SHARP),m=sh&&sh.markets.find(x=>x.key==="h2h");return m?m.outcomes.map(o=>o.name):[]});
-    st(`Récupération des stats de ${new Set(names).size} joueurs…`);
+    st(`Récupération des stats de ${new Set(names).size} joueurs (Elo, forme, fatigue, face-à-face)… ça peut prendre 30 secondes.`);
     // anciennes réponses du relais (sans retour ni forme) : on les redemande
     for(const n of names)if(isOld(statCache[n]))delete statCache[n];
-    await fetchStats(names);
-    saveRun("win",{at:Date.now(),events:slim(all),left,stats:statsFor(all)});
+    const pairs=all.flatMap(e=>{const sh=(e.bookmakers||[]).find(b=>b.key===SHARP),m=sh&&sh.markets.find(x=>x.key==="h2h");return m&&m.outcomes.length===2?[[m.outcomes[0].name,m.outcomes[1].name]]:[]});
+    for(const p of pairs)delete h2hCache[pairKey(p)];
+    await fetchStats(names,pairs);
+    saveRun("win",{at:Date.now(),events:slim(all),left,stats:statsFor(all),h2h:Object.fromEntries(pairs.map(p=>[pairKey(p),h2hCache[pairKey(p)]||null]))});
     showWin(true);
   }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
   finally{$("win-run").disabled=false}
 }
 function showWin(fresh){
   const d=RUNS.win;if(!d)return false;
-  Object.assign(statCache,d.stats||{});
+  Object.assign(statCache,d.stats||{});Object.assign(h2hCache,d.h2h||{});
   const res=analyseWinners(future(d.events),+$("minedge").value);
   lastWin=res;$("win-sortrow").hidden=!res.length;renderWin(sortWin(res));
   $("status-win").className="status";
