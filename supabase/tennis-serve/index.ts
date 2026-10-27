@@ -176,7 +176,9 @@ function serveSpeed(js: string) {
   const t = table(js, "serve-speed");
   if (!t || !t.rows.length) return null;
   const col = (name: string) => t.head.indexOf(name);
-  const rows = t.rows.slice(0, 12);
+  // la ligne « Career (N matches) » est un total : on ne garde que les matchs
+  const rows = t.rows.filter((r) => !/^career/i.test(r[0] || "")).slice(0, 12);
+  if (!rows.length) return null;
   const av = (name: string) => { const i = col(name); const v = rows.map((r) => num(r[i])).filter((x): x is number => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const mx = (name: string) => { const i = col(name); const v = rows.map((r) => num(r[i])).filter((x): x is number => x !== null); return v.length ? Math.max(...v) : null; };
   return { n: rows.length, avg: av("Avg Speed"), first: av("1st Avg"), second: av("2nd Avg"), max: mx("Max 1st"), latest: rows[0][0] || null, oldest: rows[rows.length - 1][0] || null };
