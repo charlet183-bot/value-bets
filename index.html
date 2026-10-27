@@ -111,6 +111,48 @@ details summary{cursor:pointer;font-weight:600}
 .gobtn:focus-visible{outline:2px solid var(--clay);outline-offset:2px}
 .golab{font-size:12px;color:var(--muted)}
 .acts .gobtn{padding:7px 10px;font-size:13px}
+/* Cotes cliquables + coupon */
+.odd{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:64px;padding:7px 10px;border-radius:9px;
+  border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;transition:transform .12s,background .15s,border-color .15s;-webkit-tap-highlight-color:transparent}
+.odd b{font:600 16px/1 var(--f-num)}
+.odd small{font:500 11px/1.1 var(--f-body);color:var(--muted);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.odd.val{border-color:var(--clay)}
+.odd.on{background:var(--clay);border-color:var(--clay);color:#fff}
+.odd.on small{color:#fff;opacity:.85}
+.odd:active{transform:scale(.94)}
+.odd.none{cursor:default;color:var(--muted)}
+.oddrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.oddrow .odd{width:100%}
+.slipbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(58px + env(safe-area-inset-bottom,0px));z-index:15;width:min(528px,calc(100% - 24px));
+  display:flex;align-items:center;gap:10px;padding:12px 14px;border:0;border-radius:12px;background:var(--fg);color:var(--bg);font:600 15px/1 var(--f-body);
+  box-shadow:0 6px 20px rgba(0,0,0,.25);animation:slipin .22s ease-out}
+.slipbar .sb-n{background:var(--clay);color:#fff;border-radius:99px;min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+.slipbar .sb-t{flex:1;text-align:left}
+.slipbar.bump{animation:bump .3s ease-out}
+@keyframes slipin{from{transform:translate(-50%,30px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+@keyframes bump{0%{transform:translate(-50%,0) scale(1)}40%{transform:translate(-50%,0) scale(1.04)}100%{transform:translate(-50%,0) scale(1)}}
+body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+.sheet .box{animation:sheetin .22s ease-out}
+@keyframes sheetin{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.slipbox{max-height:88vh;overflow:auto}
+.sliphead{display:flex;align-items:center;gap:8px}
+.sliphead b{flex:1;font:700 22px/1 var(--f-display);text-transform:uppercase}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:8px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.15);color:var(--clay)}
+.seg.small button{font-size:13px;padding:7px 4px}
+.legs{display:flex;flex-direction:column;gap:6px}
+.leg{display:grid;grid-template-columns:1fr 78px 34px;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.leg .lw{min-width:0;display:flex;flex-direction:column;gap:2px}
+.leg .lw small{font-size:12px;color:var(--muted)}
+.leg .lw small.pos{color:var(--good)} .leg .lw small.neg{color:var(--bad)}
+.legodd{width:100%;text-align:center;padding:8px 4px}
+.legx{padding:8px 0;border:0;background:none;color:var(--muted);font-size:16px}
+.slipsum{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.sum{display:flex;flex-direction:column;gap:4px;background:var(--bg);border-radius:10px;padding:10px}
+.sum b{font:600 20px/1 var(--f-num)}
+.sum b.gain{color:var(--clay);font-size:24px}
+#slip-quick button{padding:7px 9px}
 /* Onglet Gagnant */
 .pick{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .pick b{font:700 20px/1.1 var(--f-display);text-transform:uppercase;letter-spacing:.02em}
@@ -244,6 +286,24 @@ details summary{cursor:pointer;font-weight:600}
     <div class="panel"><div class="label">Par type de pari</div><div id="catstats"></div></div>
     <div class="panel" id="betlist"></div>
   </section>
+</div>
+
+<button id="slipbar" class="slipbar" type="button" hidden aria-label="Ouvrir le coupon">
+  <span class="sb-n" id="sb-n">0</span><span class="sb-t" id="sb-t">Coupon</span><span class="sb-o num" id="sb-o"></span>
+</button>
+<div id="slipsheet" class="sheet" hidden>
+  <div class="box slipbox" role="dialog" aria-label="Coupon">
+    <div class="sliphead"><b>Coupon</b><button id="slip-clear" class="small" type="button">Vider</button><button id="slip-close" class="small" type="button" aria-label="Fermer">✕</button></div>
+    <div id="slip-modes" class="seg"></div>
+    <div id="slip-legs" class="legs"></div>
+    <div id="slip-sys" class="row" hidden></div>
+    <div class="field"><span class="label" id="slip-stake-lab">Mise</span>
+      <div class="row"><input id="slip-stake" class="num" type="number" inputmode="decimal" min="0" step="0.5" style="width:96px"><span>€</span>
+        <div class="presets" id="slip-quick"></div></div></div>
+    <div id="slip-sum" class="slipsum"></div>
+    <div id="slip-warn" class="note"></div>
+    <div class="row"><span id="slip-go" class="grow"></span><button id="slip-save" class="primary grow" type="button">Enregistrer dans Mes paris</button></div>
+  </div>
 </div>
 
 <nav class="tabs" role="tablist">
@@ -382,7 +442,7 @@ function render(list,demo,target,cat){
     return `<div class="match hit"><div class="mhead"><span>${esc(m.tour)}</span><span>${when}${demo?' <span class="chip demo">Exemple</span>':""}</span></div>
     <div class="players">${esc(m.players)}</div>
     ${m.hits.map((h,j)=>`<div class="vb"><div class="who"><b>${esc(h.player)}</b><small>${esc(h.book)} · cote <span class="num">${odd(h.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/h.p)}</span> · proba ${pct(h.p)}</div></div>
-      <span class="edge">+${pct(h.edge)}</span><button class="small" data-m="${i}" data-h="${j}">Parier</button>${demo?"":`<div class="go">${goHtml(h.book,h.link,surname(h.player))}</div>`}</div>`).join("")}</div>`}).join("");
+      <span class="edge">+${pct(h.edge)}</span>${selBtn({sid:m.id+"|"+h.player+"|"+h.book,mid:m.id,label:h.player,match:m.players,tour:m.tour,start:m.start,book:h.book,price:h.price,p:h.p,link:h.link,copy:surname(m.players.split(" – ")[0]),cat:cat||"value",demo:!!demo})}${demo?"":`<div class="go">${goHtml(h.book,h.link,surname(h.player))}</div>`}</div>`).join("")}</div>`}).join("");
   r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo,cat:cat||"value",link:h.link,copy:surname(m.players.split(" – ")[0])})});
 }
 
@@ -670,7 +730,7 @@ function renderRank(list){
       <div><div class="mhead"><span>${esc(m.tour)}</span><span>${when}</span></div><div class="players">${esc(m.a)} – ${esc(m.b)}</div></div>
       ${svHtml}
       <div class="meta"><span>Jeux attendus <b>${m.est.toFixed(1).replace(".",",")}</b></span><span>Ligne <b>${String(m.line).replace(".",",")}</b></span><span>Équilibre <span class="meter"><i style="width:${(m.bal*100).toFixed(0)}%"></i></span> ${esc(fav[0])} ${pct(fav[1])}</span></div>
-      <div class="acts">${bb}${m.best&&m.best.edge>0?`<button class="small" data-r="${i}">Parier</button>`:""}${m.best?goHtml(m.best.book,m.best.link,surname(m.a)):""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
+      <div class="acts">${bb}${m.best?selBtn({sid:m.ev.id+"|Plus de "+m.best.pt+" jeux|"+m.best.book,mid:m.ev.id,label:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",short:"+"+String(m.best.pt).replace(".",","),match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:m.best.book,price:m.best.price,p:m.best.p,link:m.best.link,copy:surname(m.a),cat:"jeux"}):""}${m.best?goHtml(m.best.book,m.best.link,surname(m.a)):""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
   r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux",link:m.best.link,copy:surname(m.a)})});
   r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";
     if(m.sv){$("c-ha").value=(m.sv.A.hold*100).toFixed(1);$("c-hb").value=(m.sv.B.hold*100).toFixed(1);setTab("comp");runComp()}
@@ -830,7 +890,7 @@ function analyseWinners(events,minEdge){
     const val=sides.filter(s=>s&&s.edge>=minEdge).sort((x,y)=>y.edge-x.edge)[0]||null;
     const w=pFin>=.5?0:1;
     const agree=st?((st.p>=.5)===(pPin>=.5)):null;
-    out.push({tour:ev.sport_title,start:ev.commence_time,a,b,A,B,pPin,st,pFin,w,pW:probs[w],sides,val,agree,bo5,h2h});
+    out.push({id:ev.id,tour:ev.sport_title,start:ev.commence_time,a,b,A,B,pPin,st,pFin,w,pW:probs[w],sides,val,agree,bo5,h2h});
   }
   return out;
 }
@@ -943,6 +1003,7 @@ function breakdown(m){
   const extra=[adj(s.adjFat,"fatigue"),adj(s.adjH2h,"face-à-face")].filter(Boolean);
   return `<p class="note" style="margin:0">Stats pour ${surn(m.a)} : ${parts.join(" · ")}${extra.length?" · "+extra.join(" · "):""}</p>`;
 }
+const winSel=(m,sd)=>selBtn({sid:m.id+"|"+sd.player+"|"+sd.book,mid:m.id,label:sd.player,short:surname(sd.player)+" · "+sd.book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:sd.book,price:sd.price,p:sd.p,link:sd.link,copy:surname(sd.player),cat:"gagnant",value:sd.edge>=+$("minedge").value});
 function renderWin(list){
   const r=$("results-win");
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec des cotes Pinnacle pour l\'instant.</b><span class="note">Réessaie un peu plus tard.</span></div>';return}
@@ -952,11 +1013,12 @@ function renderWin(list){
     const tag=!m.st?'<span class="tag mid">Stats manquantes</span>':m.pW<.56?'<span class="tag mid">Match serré</span>':m.agree&&m.pW>=.65?'<span class="tag ok">Accord fort</span>':m.agree?'<span class="tag mid">D\'accord</span>':'<span class="tag no">Désaccord</span>';
     const bars=`<div class="split"><span></span><div class="who2"><span>${surn(m.a)}</span><span>${surn(m.b)}</span></div>${m.st?sbar("Stats",m.st.p,m.a,m.b):""}${sbar("Pinnacle",m.pPin,m.a,m.b)}${m.st?sbar("Combiné",m.pFin,m.a,m.b):""}</div>`;
     const ws=m.sides[m.w];
-    const val=m.val?`<div class="vb"><div class="who"><b>${esc(m.val.player)}</b><small>${esc(m.val.book)} · cote <span class="num">${odd(m.val.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/m.val.p)}</span> · proba ${pct(m.val.p)}</div></div><span class="edge">+${pct(m.val.edge)}</span><button class="small" data-w="${i}">Parier</button><div class="go">${goHtml(m.val.book,m.val.link,surname(m.val.player))}</div></div>`
+    const val=m.val?`<div class="vb"><div class="who"><b>${esc(m.val.player)}</b><small>${esc(m.val.book)} · cote <span class="num">${odd(m.val.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/m.val.p)}</span> · proba ${pct(m.val.p)}</div></div><span class="edge">+${pct(m.val.edge)}</span>${winSel(m,m.val)}<div class="go">${goHtml(m.val.book,m.val.link,surname(m.val.player))}</div></div>`
       :`<span class="note">${ws?`Meilleure cote pour ${surn(wn)} : ${esc(ws.book)} à <b class="num">${odd(ws.price)}</b>, cote juste ${odd(1/ws.p)} (${ws.edge>=0?"+":"−"}${pct(Math.abs(ws.edge))}). Pas assez pour parier.`:"Pas encore de cote chez les books français."}</span>${ws?`<div class="acts">${goHtml(ws.book,ws.link,surname(wn))}</div>`:""}`;
     return `<div class="match${m.val?" hit":""}"><div class="mhead"><span>${esc(m.tour)}${m.bo5?" · 5 sets":""}</span><span>${when}</span></div>
       <div class="players">${esc(m.a)} – ${esc(m.b)}</div>
       <div class="pick"><div><div class="label">Gagnant probable</div><b>${esc(wn)}</b></div><div style="text-align:right">${tag}<div class="big">${pct(m.pW)}</div></div></div>
+      ${m.sides.some(Boolean)?`<div class="oddrow">${m.sides.map(sd=>sd?winSel(m,sd):`<span class="odd none">–</span>`).join("")}</div>`:""}
       ${bars}${breakdown(m)}${alerts(m)}${val}${cmpTable(m)}</div>`}).join("");
   r.querySelectorAll("button[data-w]").forEach(btn=>btn.onclick=()=>{const m=list[btn.dataset.w],v=m.val;openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:v.player,book:v.book,price:v.price,p:v.p,demo:false,cat:"gagnant",link:v.link,copy:surname(v.player)})});
 }
@@ -1051,7 +1113,7 @@ function renderBets(){
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
     else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
 }
-const CATS={value:"Value bets",gagnant:"Gagnant",jeux:"Value jeux",comp:"Comparateur",aces:"Aces",feeling:"Feeling",autre:"Autre"};
+const CATS={value:"Value bets",combine:"Combinés",gagnant:"Gagnant",jeux:"Value jeux",comp:"Comparateur",aces:"Aces",feeling:"Feeling",autre:"Autre"};
 function renderCats(){
   const box=$("catstats"),rows=[];
   for(const c of Object.keys(CATS)){
@@ -1076,6 +1138,132 @@ $("m-ok").onclick=()=>{
   bets.unshift({id:Date.now().toString(36),cat:$("m-cat").value,match,player:pick,book:$("m-book").value,price,stake,p:null,edge:null,status:"open",at:new Date().toISOString()});
   store.set("vbt_bets",bets);$("msheet").hidden=true;$("m-match").value="";$("m-pick").value="";$("m-odds").value="";renderBets();
 };
+
+// ===================== Coupon (comme Winamax) =====================
+// On appuie sur une cote pour l'ajouter ; la barre en bas ouvre le coupon : simple, combiné ou système.
+let slip=store.get("vbt_slip",[]);
+let slipMode=store.get("vbt_slipmode","combi"),sysK=store.get("vbt_sysk",2);
+const SELS={};
+function selBtn(sel){
+  SELS[sel.sid]=sel;
+  const on=slip.some(x=>x.sid===sel.sid);
+  return `<button type="button" class="odd${on?" on":""}${sel.value?" val":""}" data-sid="${esc(sel.sid)}" aria-pressed="${on}">${sel.short?`<small>${esc(sel.short)}</small>`:""}<b class="num">${odd(sel.price)}</b></button>`;
+}
+function saveSlip(){store.set("vbt_slip",slip);store.set("vbt_slipmode",slipMode);store.set("vbt_sysk",sysK)}
+function toggleSel(sid,btn){
+  const i=slip.findIndex(x=>x.sid===sid);
+  if(i>=0)slip.splice(i,1);
+  else{const x=SELS[sid];if(!x)return;slip.push({...x});if(slip.length===2&&slipMode==="simple")slipMode="combi"}
+  if(btn&&navigator.vibrate)try{navigator.vibrate(8)}catch(e){}
+  saveSlip();syncOdds();renderSlipBar(true);if(!$("slipsheet").hidden)renderSlip();
+}
+function syncOdds(){document.querySelectorAll("button.odd[data-sid]").forEach(b=>{const on=slip.some(x=>x.sid===b.dataset.sid);b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)})}
+document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("button.odd[data-sid]");if(b){e.preventDefault();toggleSel(b.dataset.sid,b)}});
+
+const prod=xs=>xs.reduce((a,x)=>a*x,1);
+function combos(n,k){const out=[],c=[];(function go(st){if(c.length===k){out.push(c.slice());return}for(let i=st;i<n;i++){c.push(i);go(i+1);c.pop()}})(0);return out}
+// Calcul du coupon : cote, gain, chance de gagner et value d'après les probabilités du modèle
+function slipCalc(stake){
+  const legs=slip,n=legs.length,ps=legs.map(l=>l.p),known=ps.every(p=>p>0&&p<1);
+  const mids=legs.map(l=>l.mid),dup=new Set(mids.filter((x,i)=>mids.indexOf(x)!==i)).size>0;
+  const books=[...new Set(legs.map(l=>l.book))];
+  if(slipMode==="simple"){
+    const total=stake*n,maxWin=legs.reduce((a,l)=>a+stake*l.price,0);
+    const exp=known?legs.reduce((a,l)=>a+stake*l.price*l.p,0):null;
+    return{total,maxWin,odds:null,pAny:known?1-prod(ps.map(p=>1-p)):null,exp,dup,books,n};
+  }
+  if(slipMode==="combi"){
+    const o=prod(legs.map(l=>l.price)),p=known?prod(ps):null;
+    return{total:stake,maxWin:stake*o,odds:o,pAll:p,pAny:p,exp:p!=null?stake*o*p:null,dup,books,n};
+  }
+  // système k parmi n : une mise par combinaison
+  const k=Math.min(Math.max(2,sysK),n-1),cs=combos(n,k),total=stake*cs.length;
+  const maxWin=cs.reduce((a,c)=>a+stake*prod(c.map(i=>legs[i].price)),0);
+  let exp=null,pAny=null;
+  if(known&&n<=12){exp=0;pAny=0;
+    for(let mask=0;mask<1<<n;mask++){
+      let pr=1,w=0;for(let i=0;i<n;i++){const won=mask>>i&1;pr*=won?ps[i]:1-ps[i];w+=won}
+      if(w>=k){pAny+=pr;exp+=pr*cs.reduce((a,c)=>a+(c.every(i=>mask>>i&1)?stake*prod(c.map(i=>legs[i].price)):0),0)}
+    }}
+  return{total,maxWin,odds:null,k,nComb:cs.length,pAny,exp,dup,books,n};
+}
+function renderSlipBar(bump){
+  const bar=$("slipbar"),n=slip.length;
+  bar.hidden=!n;document.body.classList.toggle("has-slip",!!n);
+  if(!n){$("slipsheet").hidden=true;return}
+  $("sb-n").textContent=n;
+  $("sb-t").textContent=n===1?"1 sélection":`${n} sélections`;
+  $("sb-o").textContent=n>1?"cote "+odd(prod(slip.map(l=>l.price))):"cote "+odd(slip[0].price);
+  if(bump){bar.classList.remove("bump");void bar.offsetWidth;bar.classList.add("bump")}
+}
+function slipStake(){const v=parseFloat(String($("slip-stake").value).replace(",","."));return v>0?v:0}
+function renderSlip(){
+  const n=slip.length;if(!n){$("slipsheet").hidden=true;renderSlipBar();return}
+  const modes=[["simple","Simple"],["combi","Combiné"],["system","Système"]].filter(([k])=>k!=="system"||n>=3);
+  if(slipMode==="system"&&n<3)slipMode="combi";
+  if(slipMode==="combi"&&n<2)slipMode="simple";
+  $("slip-modes").innerHTML=modes.map(([k,l])=>`<button type="button" data-mode="${k}" aria-pressed="${slipMode===k}"${k!=="simple"&&n<2?" disabled":""}>${l}</button>`).join("");
+  $("slip-modes").querySelectorAll("button").forEach(b=>b.onclick=()=>{slipMode=b.dataset.mode;saveSlip();renderSlip()});
+  $("slip-legs").innerHTML=slip.map((l,i)=>{
+    const edge=l.p?l.price*l.p-1:null;
+    return `<div class="leg"><div class="lw"><b>${esc(l.label)}</b><small>${esc(l.match)} · ${esc(l.book)}</small>
+      ${edge!=null?`<small class="${edge>=0?"pos":"neg"}">${edge>=0?"Value +":"Pas de value −"}${pct(Math.abs(edge))} · chance ${pct(l.p)}</small>`:""}</div>
+      <input class="num legodd" data-i="${i}" type="number" inputmode="decimal" step="0.01" value="${l.price.toFixed(2)}" aria-label="Cote">
+      <button type="button" class="legx" data-x="${i}" aria-label="Retirer">✕</button></div>`}).join("");
+  $("slip-legs").querySelectorAll(".legodd").forEach(inp=>inp.oninput=()=>{const v=parseFloat(String(inp.value).replace(",","."));if(v>1){slip[+inp.dataset.i].price=v;saveSlip();renderSlipBar();renderSum()}});
+  $("slip-legs").querySelectorAll(".legx").forEach(b=>b.onclick=()=>{const sid=slip[+b.dataset.x].sid;toggleSel(sid)});
+  const sys=$("slip-sys");sys.hidden=slipMode!=="system";
+  if(slipMode==="system"){const ks=[];for(let k=2;k<n;k++)ks.push(k);if(!ks.includes(sysK))sysK=ks[0];
+    sys.innerHTML=`<span class="label">Combinaisons</span><div class="seg small">${ks.map(k=>`<button type="button" data-k="${k}" aria-pressed="${sysK===k}">${k} sur ${n}</button>`).join("")}</div>`;
+    sys.querySelectorAll("button").forEach(b=>b.onclick=()=>{sysK=+b.dataset.k;saveSlip();renderSlip()})}
+  $("slip-stake-lab").textContent=slipMode==="simple"?"Mise par pari":slipMode==="system"?"Mise par combinaison":"Mise";
+  $("slip-quick").innerHTML=[1,2,5,10,20,50].map(v=>`<button type="button" data-v="${v}">${v} €</button>`).join("");
+  $("slip-quick").querySelectorAll("button").forEach(b=>b.onclick=()=>{$("slip-stake").value=b.dataset.v;store.set("vbt_slipstake",+b.dataset.v);renderSum()});
+  const l0=slip[0];$("slip-go").innerHTML=l0.demo?"":goHtml(l0.book,n===1?l0.link:null,l0.copy);
+  renderSum();
+}
+function renderSum(){
+  const st=slipStake(),c=slipCalc(st),ev=c.exp!=null&&c.total?c.exp/c.total-1:null;
+  const big=(lab,v,cls="")=>`<div class="sum"><span class="label">${lab}</span><b class="num ${cls}">${v}</b></div>`;
+  $("slip-sum").innerHTML=
+    (c.odds?big("Cote totale",odd(c.odds)):"")+
+    (slipMode==="system"?big("Combinaisons",`${c.nComb}`):"")+
+    big("Mise totale",eur(c.total))+
+    big(slipMode==="combi"?"Gain potentiel":"Gain max",eur(c.maxWin),"gain")+
+    (c.pAny!=null?big(slipMode==="combi"?"Chance de passer":slipMode==="simple"?"Au moins 1 gagnant":`Au moins ${c.k} bons`,pct(c.pAny)):"")+
+    (ev!=null?big("Value",(ev>=0?"+":"−")+pct(Math.abs(ev)),ev>=0?"pos":"neg"):"");
+  const w=[];
+  if(c.dup&&slipMode!=="simple")w.push("⚠ Deux sélections du même match : Winamax refuse ce combiné.");
+  if(c.books.length>1&&slipMode!=="simple")w.push(`⚠ Cotes de plusieurs bookmakers (${c.books.map(esc).join(", ")}) : un combiné se joue chez un seul, vérifie les cotes chez lui.`);
+  if(slipMode!=="simple"&&slip.some(l=>l.p&&l.price*l.p<1))w.push("Les sélections sans value font baisser la value du combiné : chaque marge du bookmaker se multiplie.");
+  if(c.pAny!=null)w.push("Chances estimées par le modèle, en supposant les matchs indépendants.");
+  $("slip-warn").innerHTML=w.join("<br>");
+  $("slip-save").disabled=!st||(c.dup&&slipMode!=="simple");
+}
+function openSlip(){const sv=store.get("vbt_slipstake",null);$("slip-stake").value=sv||$("stake").value||5;$("slipsheet").hidden=false;renderSlip()}
+$("slipbar").onclick=openSlip;
+$("slip-close").onclick=()=>{$("slipsheet").hidden=true};
+$("slipsheet").addEventListener("click",e=>{if(e.target.id==="slipsheet")$("slipsheet").hidden=true});
+$("slip-clear").onclick=()=>{slip=[];saveSlip();syncOdds();renderSlipBar()};
+$("slip-stake").oninput=()=>{store.set("vbt_slipstake",slipStake()||null);renderSum()};
+$("slip-save").onclick=()=>{
+  const st=slipStake();if(!st)return;
+  const now=new Date().toISOString(),id=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const one=(legs,stake)=>{
+    const price=prod(legs.map(l=>l.price)),p=legs.every(l=>l.p)?prod(legs.map(l=>l.p)):null;
+    return legs.length===1
+      ?{id:id(),cat:legs[0].cat||"value",match:legs[0].match,tour:legs[0].tour,start:legs[0].start,player:legs[0].label,book:legs[0].book,price,stake,p,edge:p?price*p-1:null,status:"open",at:now,link:legs[0].link,copy:legs[0].copy,demo:legs[0].demo}
+      :{id:id(),cat:"combine",match:legs.map(l=>l.match).join(" / "),player:`Combiné ×${legs.length} : `+legs.map(l=>l.label).join(" + "),book:[...new Set(legs.map(l=>l.book))].join(", "),price,stake,p,edge:p?price*p-1:null,status:"open",at:now,demo:legs.some(l=>l.demo)};
+  };
+  let nb=[];
+  if(slipMode==="simple")nb=slip.map(l=>one([l],st));
+  else if(slipMode==="combi")nb=[one(slip,st)];
+  else nb=combos(slip.length,Math.min(sysK,slip.length-1)).map(c=>one(c.map(i=>slip[i]),st));
+  bets=[...nb,...bets];store.set("vbt_bets",bets);
+  slip=[];saveSlip();syncOdds();renderSlipBar();renderBets();setTab("bets");window.scrollTo(0,0);
+};
+renderSlipBar();
+
 function setTab(t){for(const k of ["scan","win","jeux","comp","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-win").onclick=()=>setTab("win");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
 function refreshAll(){
