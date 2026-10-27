@@ -171,6 +171,15 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 .cmp td.best{color:var(--clay);font-weight:700}
 .cmp thead td{font:600 13px/1.2 var(--f-body);border-top:0}
 .form{letter-spacing:.12em}
+.speed{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:8px;background:var(--bg)}
+.sg-h{display:flex;justify-content:space-between;font:600 12px/1 var(--f-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.sg-h small{text-transform:none;letter-spacing:0;font-weight:400}
+.sg{display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;font-size:14px}
+.sg-n{font-weight:600}
+.sg-bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.sg-bar i{display:block;height:100%;background:var(--muted);border-radius:99px}
+.sg-bar i.best{background:var(--clay)}
+.sg b{font-weight:500;font-size:14px;text-align:right}
 .calc>summary{font-size:13px;color:var(--muted);font-weight:500}
 .calcrows{display:grid;grid-template-columns:1fr auto 70px;gap:4px 10px;font-size:13px;margin-top:6px}
 .calcrows b{text-align:right}
@@ -803,6 +812,7 @@ function renderRank(list){
     const bb=m.best?`<span class="note">Meilleur « plus de ${String(m.best.pt).replace(".",",")} » : ${esc(m.best.book)} à <b class="num">${odd(m.best.price)}</b> (${m.best.edge>=0?"+":"−"}${pct(Math.abs(m.best.edge))})</span>`:'<span class="note">Pas encore de ligne chez les books français.</span>';
     return `<div class="rank"><span class="n">${i+1}</span>
       <div><div class="mhead"><span>${esc(m.tour)}</span><span>${when}</span></div><div class="players">${esc(m.a)} – ${esc(m.b)}</div></div>
+      ${speedGauge(m.a,m.b,statCache[m.a],statCache[m.b])}
       ${svHtml}
       <div class="meta"><span>Jeux attendus <b>${m.est.toFixed(1).replace(".",",")}</b></span><span>Ligne <b>${String(m.line).replace(".",",")}</b></span><span>Équilibre <span class="meter"><i style="width:${(m.bal*100).toFixed(0)}%"></i></span> ${esc(fav[0])} ${pct(fav[1])}</span></div>
       <div class="acts">${bb}${m.best?selBtn({sid:m.ev.id+"|Plus de "+m.best.pt+" jeux|"+m.best.book,mid:m.ev.id,label:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",short:"+"+String(m.best.pt).replace(".",","),match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:m.best.book,price:m.best.price,p:m.best.p,link:m.best.link,copy:surname(m.a),cat:"jeux"}):""}${m.best?goHtml(m.best.book,m.best.link,surname(m.a)):""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
@@ -1011,6 +1021,16 @@ function sbar(lab,p,a,b){return `<span class="lab">${lab}</span><div class="sbar
 const ratio=o=>o&&o.n?o.w/o.n:null;
 // Vitesse de service : Tennis Abstract la donne en mph, mesurée à Wimbledon et à l'US Open
 const KMH=1.609344,kmh=v=>v==null?"–":Math.round(v*KMH)+" km/h";
+// Jauge de vitesse visible directement sur chaque match (1re balle moyenne, échelle 170-215 km/h)
+function speedGauge(na,nb,A,B){
+  const v=P=>P&&P.speed&&P.speed.first?P.speed.first*KMH:null,va=v(A),vb=v(B);
+  if(va==null&&vb==null)return"";
+  const w=x=>x==null?0:Math.max(6,Math.min(100,(x-170)/(215-170)*100));
+  const row=(n,x,P,best)=>`<span class="sg-n">${esc(n.split(" ").pop())}</span><span class="sg-bar"><i class="${best?"best":""}" style="width:${w(x)}%"></i></span><b class="num">${x==null?"–":Math.round(x)+" km/h"}</b>`;
+  const yrs=[speedYears(A),speedYears(B)].filter(Boolean);
+  return `<div class="speed"><div class="sg-h"><span>Vitesse moyenne 1re balle</span><small>${yrs.length?"radar "+esc(yrs[0]):""}</small></div>
+    <div class="sg">${row(na,va,A,va!=null&&vb!=null&&va>vb)}${row(nb,vb,B,va!=null&&vb!=null&&vb>va)}</div></div>`;
+}
 const speedYears=P=>{const s=P&&P.speed;if(!s)return"";const y=[s.latest,s.oldest].map(x=>(x||"").match(/\d{4}/)).filter(Boolean).map(m=>m[0]);return y.length?[...new Set(y)].sort().join("-"):""};
 const frac=(w,n)=>n?`${w}/${n} <small>${pct(w/n)}</small>`:"–";
 const handOf=P=>{const b=P.bio;if(!b||!b.hand||b.hand==="U")return null;return (b.hand==="L"?"Gaucher":"Droitier")+(b.backhand?`<br><small>revers ${b.backhand===1?"à 1 main":"à 2 mains"}</small>`:"")};
@@ -1132,6 +1152,7 @@ function renderWin(list){
     return `<div class="match${m.val?" hit":""}"><div class="mhead"><span>${esc(m.tour)}${m.bo5?" · 5 sets":""}</span><span>${when}</span></div>
       <div class="players">${esc(m.a)} – ${esc(m.b)}</div>
       <div class="pick"><div><div class="label">Gagnant probable</div><b>${esc(wn)}</b></div><div style="text-align:right">${tag}<div class="big">${pct(m.pW)}</div></div></div>
+      ${speedGauge(m.a,m.b,m.A,m.B)}
       ${m.sides.some(Boolean)?`<div class="oddrow">${m.sides.map(sd=>sd?winSel(m,sd):`<span class="odd none">–</span>`).join("")}</div>`:""}
       ${bars}${breakdown(m)}${alerts(m)}${val}${cmpTable(m)}</div>`}).join("");
   r.querySelectorAll("button[data-w]").forEach(btn=>btn.onclick=()=>{const m=list[btn.dataset.w],v=m.val;openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:v.player,book:v.book,price:v.price,p:v.p,demo:false,cat:"gagnant",link:v.link,copy:surname(v.player)})});
