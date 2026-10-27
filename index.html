@@ -307,9 +307,20 @@ const safeUrl=u=>typeof u==="string"&&/^https:\/\//i.test(u)?u:null;
 const lk=(o,m,b)=>safeUrl(o&&o.link)||safeUrl(m&&m.link)||safeUrl(b&&b.link)||null;
 function goHtml(book,link,copy){
   const url=safeUrl(link)||HOME[book];if(!url)return"";
-  return `<a class="gobtn" href="${esc(url)}" rel="noopener"${link?"":` data-copy="${esc(copy||"")}"`}>Ouvrir ${esc(book)} ↗</a>${link?"":`<span class="golab">Page tennis · ${copy?"nom copié, colle-le dans la recherche":"cherche le match"}</span>`}`;
+  return `<a class="gobtn" href="${esc(url)}" rel="noopener" data-book="${esc(book)}"${link&&!APP[book]?"":` data-copy="${esc(copy||"")}"`}>Ouvrir ${esc(book)} ↗</a>${link&&!APP[book]?"":`<span class="golab">${APP[book]?"Ouvre l'appli":"Page tennis"} · ${copy?"nom copié, colle-le dans la recherche":"cherche le match"}</span>`}`;
 }
-document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest("a.gobtn[data-copy]");if(a&&a.dataset.copy){try{navigator.clipboard.writeText(a.dataset.copy)}catch(_){}}});
+// Appli installée : on tente d'abord l'appli (schéma winamax://), puis le site si elle ne s'ouvre pas
+const APP={Winamax:"winamax://"};
+document.addEventListener("click",e=>{
+  const a=e.target.closest&&e.target.closest("a.gobtn");if(!a)return;
+  if(a.dataset.copy){try{navigator.clipboard.writeText(a.dataset.copy).catch(()=>{})}catch(_){}}
+  const app=APP[a.dataset.book];if(!app)return;
+  e.preventDefault();
+  let left=false;const onHide=()=>{left=true};
+  document.addEventListener("visibilitychange",onHide,{once:true});window.addEventListener("pagehide",onHide,{once:true});
+  location.href=app;
+  setTimeout(()=>{if(!left&&document.visibilityState==="visible")location.href=a.href},1500);
+});
 
 // Recherches gardées sur le téléphone : on peut fermer l'appli sans repayer de crédits
 const RUNS={};
