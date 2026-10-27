@@ -171,6 +171,10 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 .cmp td.best{color:var(--clay);font-weight:700}
 .cmp thead td{font:600 13px/1.2 var(--f-body);border-top:0}
 .form{letter-spacing:.12em}
+.calc>summary{font-size:13px;color:var(--muted);font-weight:500}
+.calcrows{display:grid;grid-template-columns:1fr auto 70px;gap:4px 10px;font-size:13px;margin-top:6px}
+.calcrows b{text-align:right}
+.calcrows .who3{color:var(--muted)}
 .allstats>summary{margin-bottom:4px}
 .grp{border-top:1px solid var(--line);padding:6px 0}
 .grp>summary{font:700 14px/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.05em;color:var(--clay);padding:4px 0}
@@ -229,11 +233,11 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
     <div id="results-win" class="wrap" style="padding:0"></div>
     <details class="panel">
       <summary>Comment le gagnant est calculé</summary>
-      <p class="note">1. Service contre retour : le % de points gagnés au service de A, corrigé par la qualité de retour de B (et inversement), donne la chance de gagner chaque point. On en déduit jeux, tie-breaks, sets et match (3 sets gagnants en Grand Chelem masculin).</p>
-      <p class="note">Base : Elo par surface (Tennis Abstract), la meilleure mesure du niveau réel d'un joueur, elle compte pour près de la moitié du % stats.</p>
-      <p class="note">2. Qualité des adversaires : chaque match passé est pesé selon le classement de l'adversaire. Battre un top 20 compte beaucoup, enchaîner des victoires contre des 300e compte peu. Les stats de service et de retour sont aussi corrigées (servir face à un top 10 est plus dur). La forme mesure les victoires au-dessus de ce que le classement des adversaires laissait prévoir, les matchs récents pesant plus.</p>
-      <p class="note">3. Avis combiné : 65 % Pinnacle, 35 % stats. Pinnacle reste la meilleure estimation disponible ; les stats servent surtout à repérer quand le marché semble se tromper. Un pari n'est proposé que si la meilleure cote française bat cet avis combiné.</p>
-      <p class="note">4. Ajustements : petit malus de fatigue (beaucoup de matchs en 2 semaines, long dernier match) ou de reprise (plus d'un mois sans tournoi), léger bonus de face-à-face à partir de 3 matchs entre eux. Les rubriques Mental, Service et Niveau des tournois sont affichées pour ton jugement mais ne changent pas le %.</p>
+      <p class="note">Le % « Stats » est une régression logistique : chaque stat de l'onglet compare les deux joueurs, et son poids a été <b>appris sur 44 000 matchs ATP de 2008 à 2026</b> (base TML, issue des données de Jeff Sackmann), en recalculant les stats telles qu'elles étaient avant chaque match.</p>
+      <p class="note">Testé sur 5 238 matchs de 2024 à 2026 jamais vus pendant l'apprentissage : bon vainqueur trouvé <b>64,8 %</b> du temps, contre 63,1 % avec l'Elo seul, 63,5 % avec le classement seul et 63,3 % avec l'ancien calcul de l'appli.</p>
+      <table class="cmp"><thead><tr><td>Groupe de stats</td><td>Poids</td></tr></thead><tbody><tr><th>Elo sur la surface</th><td>31 %</td></tr><tr><th>Service contre retour</th><td>23 %</td></tr><tr><th>Classement</th><td>17 %</td></tr><tr><th>Physique (main, âge, taille)</th><td>13 %</td></tr><tr><th>Fatigue et reprise</th><td>6 %</td></tr><tr><th>Tendance</th><td>4 %</td></tr><tr><th>Face-à-face</th><td>3 %</td></tr><tr><th>Détail du service</th><td>2 %</td></tr><tr><th>Forme (adversaires pris en compte)</th><td>1 %</td></tr><tr><th>Mental</th><td>0 %</td></tr><tr><th>Bilan sur la surface</th><td>0 %</td></tr><tr><th>Niveau du tournoi</th><td>0 %</td></tr></tbody></table>
+      <p class="note">Poids 0 : la stat n'apporte rien de plus que les autres. Le mental, le bilan sur la surface et le niveau du tournoi sont déjà contenus dans l'Elo et le service (un joueur fort sauve plus de balles de break), donc ils ne changent pas le %. Ils restent affichés dans le tableau.</p>
+      <p class="note">Avis combiné : 65 % Pinnacle, 35 % stats. Pinnacle reste plus précis que n'importe quel modèle de stats ; un pari n'est proposé que si la meilleure cote française bat cet avis combiné. Poids appris sur l'ATP, appliqués aussi à la WTA.</p>
       <p class="note">Le modèle ne voit pas les blessures annoncées ni la forme du jour. Même un favori à 75 % perd un match sur quatre.</p>
     </details>
   </section>
@@ -833,6 +837,40 @@ function blendStat(P,surf,k){
   return (s.n*s[k]+6*base)/(s.n+6);
 }
 const ELO_K={Hard:"hElo",Clay:"cElo",Grass:"gElo"};
+// Poids de chaque stat, appris par régression logistique (signes imposés) sur l'historique ATP 2008-2026.
+// Une stat à 0 n'apporte rien de plus que les autres pour prédire le vainqueur.
+const LEARNED={"elo": 0.3603, "serve": 0.2233, "form": 0.0515, "trend": 0.242, "bp": 0.0, "tb": 0.0, "dec": 0.0, "cb": 0.0, "fi": 0.0089, "fw": 0.0235, "sw": 0.0145, "df": 0.0, "surf": 0.0, "lvl": 0.0, "rank": 0.1792, "n14": 0.0, "lastmin": -0.0432, "rust35": -0.1483, "rust60": 0.0, "h2h": 0.208, "lefty": -0.009, "age": -0.0289, "age2": 0.0043, "ht": 0.0326};
+const FEAT_GROUP={elo:"Elo",serve:"Service/retour",form:"Forme",trend:"Tendance",bp:"Mental",tb:"Mental",dec:"Mental",cb:"Mental",fi:"Détail service",fw:"Détail service",sw:"Détail service",df:"Détail service",surf:"Bilan surface",lvl:"Niveau tournoi",rank:"Classement",n14:"Fatigue",lastmin:"Fatigue",rust35:"Fatigue",rust60:"Fatigue",h2h:"Face-à-face",lefty:"Physique",age:"Physique",age2:"Physique",ht:"Physique"};
+const SHRINK={bp:[20,.62],tb:[6,.5],dec:[6,.5],cb:[6,.3],surf:[6,.5],lvl:[6,.5]};
+const shr=(w,n,k)=>(w+SHRINK[k][0]*SHRINK[k][1])/(n+SHRINK[k][0]*1);
+// Mêmes définitions qu'à l'entraînement : différence joueur A − joueur B
+function learnedFeatures(A,B,o){
+  const L=p=>logit(p),x={};
+  if(o.eA!=null&&o.eB!=null)x.elo=(o.eA-o.eB)*Math.LN10/400;
+  if(o.pServe!=null&&isFinite(o.pServe))x.serve=L(o.pServe);
+  const qa=A.quality,qb=B.quality;
+  if(qa&&qb){x.form=qa.perf-qb.perf;if(qa.perf5!=null&&qb.perf5!=null)x.trend=(qa.perf5-qa.perf20)-(qb.perf5-qb.perf20)}
+  const ca=A.clutch,cb=B.clutch;
+  if(ca&&cb){
+    if(ca.bpFaced&&cb.bpFaced)x.bp=L(shr(ca.bpSaved,ca.bpFaced,"bp"))-L(shr(cb.bpSaved,cb.bpFaced,"bp"));
+    x.tb=L(shr(ca.tbW,ca.tbN,"tb"))-L(shr(cb.tbW,cb.tbN,"tb"));
+    x.dec=L(shr(ca.decW,ca.decN,"dec"))-L(shr(cb.decW,cb.decN,"dec"));
+    x.cb=L(shr(ca.comebackW,ca.comebackN,"cb"))-L(shr(cb.comebackW,cb.comebackN,"cb"));
+  }
+  const sa=A.serve,sb=B.serve;
+  if(sa&&sb)for(const [k,f] of [["fi","firstIn"],["fw","firstWon"],["sw","secondWon"],["df","df"]])if(sa[f]!=null&&sb[f]!=null)x[k]=(sa[f]-sb[f])*10;
+  x.rank=Math.log(Math.min(2000,Math.max(1,B.rank||500)))-Math.log(Math.min(2000,Math.max(1,A.rank||500)));
+  const fa=A.fatigue||{},fb=B.fatigue||{};
+  if(fa.n14!=null&&fb.n14!=null)x.n14=Math.min(10,fa.n14)-Math.min(10,fb.n14);
+  x.lastmin=(Math.min(300,fa.lastMin||100)-Math.min(300,fb.lastMin||100))/60;
+  x.rust35=(fa.days>35?1:0)-(fb.days>35?1:0);x.rust60=(fa.days>60?1:0)-(fb.days>60?1:0);
+  const h=h2hCache[A.__name+"|"+B.__name];
+  if(h)x.h2h=(h.a-h.b)/(h.a+h.b+2);
+  x.lefty=(A.bio&&A.bio.hand==="L"?1:0)-(B.bio&&B.bio.hand==="L"?1:0);
+  const ag=P=>ageOf(P)??26;x.age=ag(A)-ag(B);x.age2=((ag(A)-26)**2-(ag(B)-26)**2)/10;
+  const ht=P=>P.bio&&P.bio.height||186;x.ht=(ht(A)-ht(B))/10;
+  return x;
+}
 // Elo du joueur sur la surface (moyenne Elo général / Elo surface, comme Tennis Abstract)
 function eloOn(P,surf){const e=P&&P.elo;if(!e||e.elo==null)return null;const x=surf&&e[ELO_K[surf]];return x!=null?(e.elo+x)/2:e.elo}
 const dur=m=>`${Math.floor(m/60)} h ${String(m%60).padStart(2,"0")}`;
@@ -857,16 +895,12 @@ function statModel(A,B,wta,bo5,h){
   if(A.quality&&B.quality)pForm=1/(1+Math.exp(-3*(A.quality.perf-B.quality.perf))); // forme pondérée par la force des adversaires
   else if(A.results>=5&&B.results>=5){const a=(A.wins+2)/(A.results+4),b=(B.wins+2)/(B.results+4);pForm=a*(1-b)/(a*(1-b)+b*(1-a))}
   const eA=eloOn(A,surf),eB=eloOn(B,surf);
-  let pElo=eA!=null&&eB!=null?1/(1+Math.pow(10,(eB-eA)/400)):null;
-  if(pElo!=null&&bo5)pElo=unlogit(logit(pElo)*1.25); // en 5 sets, le plus fort gagne plus souvent
-  // Elo = base du calcul ; sans Elo, le classement le remplace
-  const parts=pElo!=null?[[pElo,.45],[pServe,.35]]:[[pServe,.6]];
-  if(pElo==null&&pRank!=null)parts.push([pRank,.2]);
-  if(pForm!=null)parts.push([pForm,.2]);
-  const ws=parts.reduce((t,[,w])=>t+w,0),base=parts.reduce((t,[p,w])=>t+logit(p)*w,0)/ws;
-  const fA=fatiguePen(A),fB=fatiguePen(B),adjFat=fB.v-fA.v;
-  const adjH2h=h&&h.n>=3?.3*(h.a-h.b)/h.n:0; // léger bonus, seulement à partir de 3 matchs entre eux
-  return {p:unlogit(base+adjFat+adjH2h),pBase:unlogit(base),pElo,eA,eB,pServe,pRank,pForm,adjFat,adjH2h,fA,fB,ha,hb,surf,sA,sB,rA,rB};
+  const pElo=eA!=null&&eB!=null?1/(1+Math.pow(10,(eB-eA)/400)):null;
+  // ---- poids appris sur ~44 000 matchs ATP 2008-2026 (voir « Comment le gagnant est calculé »)
+  const x=learnedFeatures(A,B,{eA,eB,pServe}),groups={};let z=0;
+  for(const [k,w] of Object.entries(LEARNED)){const c=w*(x[k]||0);z+=c;const g=FEAT_GROUP[k];groups[g]=(groups[g]||0)+c}
+  const fA=fatiguePen(A),fB=fatiguePen(B);
+  return {p:unlogit(z),z,groups,pElo,eA,eB,pServe,pRank,pForm,fA,fB,ha,hb,surf,sA,sB,rA,rB};
 }
 function analyseWinners(events,minEdge){
   const out=[];
@@ -878,6 +912,7 @@ function analyseWinners(events,minEdge){
     const wta=/WTA/i.test(ev.sport_title+" "+ev.sport_key);
     const bo5=!wta&&/australian open|french open|roland|wimbledon|us open/i.test(ev.sport_title||"");
     const h2h=h2hCache[a+"|"+b]||null;
+    if(A)A.__name=a;if(B)B.__name=b;
     const st=A&&B&&A.spw!=null&&B.spw!=null?statModel(A,B,wta,bo5,h2h):null;
     const pFin=st?unlogit(.65*logit(pPin)+.35*logit(st.p)):pPin;
     const best=[null,null];
@@ -992,16 +1027,14 @@ function alerts(m){
   return out.length?`<div class="note">${out.join("<br>")}</div>`:"";
 }
 // Détail du % « Stats » : chaque morceau, puis les ajustements fatigue et face-à-face
+// Détail du % « Stats » : ce que chaque groupe de stats ajoute ou retire, en points de %
 function breakdown(m){
   const s=m.st;if(!s)return"";
-  const parts=[];
-  if(s.pElo!=null)parts.push(`Elo ${pct(s.pElo)}`);
-  parts.push(`service/retour ${pct(s.pServe)}`);
-  if(s.pElo==null&&s.pRank!=null)parts.push(`classement ${pct(s.pRank)}`);
-  if(s.pForm!=null)parts.push(`forme ${pct(s.pForm)}`);
-  const adj=(x,lab)=>{const d=Math.round((unlogit(logit(s.pBase)+x)-s.pBase)*100);return d?`${lab} +${Math.abs(d)} pt${Math.abs(d)>1?"s":""} pour ${d>0?surn(m.a):surn(m.b)}`:""};
-  const extra=[adj(s.adjFat,"fatigue"),adj(s.adjH2h,"face-à-face")].filter(Boolean);
-  return `<p class="note" style="margin:0">Stats pour ${surn(m.a)} : ${parts.join(" · ")}${extra.length?" · "+extra.join(" · "):""}</p>`;
+  const items=Object.entries(s.groups).map(([g,c])=>[g,Math.round((s.p-unlogit(s.z-c))*100)]).filter(([,d])=>d!==0).sort((x,y)=>Math.abs(y[1])-Math.abs(x[1]));
+  const zero=[...new Set(Object.values(FEAT_GROUP))].filter(g=>Object.entries(LEARNED).every(([k,w])=>FEAT_GROUP[k]!==g||w===0));
+  return `<details class="calc"><summary>Détail du calcul (${pct(s.p)} pour ${surn(m.a)})</summary>
+    <div class="calcrows">${items.map(([g,d])=>`<span>${esc(g)}</span><b class="num">+${Math.abs(d)} pt${Math.abs(d)>1?"s":""}</b><span class="who3">${d>0?surn(m.a):surn(m.b)}</span>`).join("")}</div>
+    <p class="note" style="margin:6px 0 0">Points de % gagnés grâce à chaque groupe de stats, par rapport à un match à 50/50. Poids appris sur 44 000 matchs ATP.${zero.length?` Sans effet mesurable (poids 0) : ${zero.map(esc).join(", ")}.`:""}</p></details>`;
 }
 const winSel=(m,sd)=>selBtn({sid:m.id+"|"+sd.player+"|"+sd.book,mid:m.id,label:sd.player,short:surname(sd.player)+" · "+sd.book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:sd.book,price:sd.price,p:sd.p,link:sd.link,copy:surname(sd.player),cat:"gagnant",value:sd.edge>=+$("minedge").value});
 function renderWin(list){
