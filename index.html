@@ -141,6 +141,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 .seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:8px;font-size:14px}
 .seg button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.15);color:var(--clay)}
 .seg.small button{font-size:13px;padding:7px 4px}
+.tourfilter{margin:0}
 .legs{display:flex;flex-direction:column;gap:6px}
 .leg{display:grid;grid-template-columns:1fr 78px 34px;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
 .leg .lw{min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -219,6 +220,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
       <div id="status" class="status">Exemple chargé ci-dessous. Ajoute ta clé pour les vraies cotes.</div>
       <p class="note" style="margin:0">Tes recherches restent enregistrées sur ce téléphone : tu peux fermer l'appli, changer le seuil ou tes bookmakers sans repayer de crédits.</p>
     </div>
+    <div class="seg tourfilter" role="group" aria-label="Circuit"></div>
     <div id="results" class="wrap" style="padding:0"></div>
     <details class="panel">
       <summary>Comment ça marche</summary>
@@ -237,8 +239,9 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
       <div class="row"><button id="win-run" class="primary grow">Analyser les matchs</button></div>
       <div id="status-win" class="status">Les stats viennent de Tennis Abstract : les joueurs peu connus (Challenger, ITF) peuvent manquer.</div>
     </div>
+    <div class="seg tourfilter" role="group" aria-label="Circuit"></div>
     <div class="row" id="win-sortrow" hidden><label class="label" for="win-sort">Trier par</label>
-      <select id="win-sort"><option value="conf">Gagnant le plus sûr</option><option value="value">Plus grosse value</option><option value="agree">Stats et Pinnacle d'accord</option><option value="time">Heure du match</option></select></div>
+      <select id="win-sort"><option value="conf">Gagnant le plus sûr</option><option value="value">Plus grosse value</option><option value="agree">Stats et Pinnacle d'accord</option><option value="speed">Plus gros écart de vitesse de service</option><option value="time">Heure du match</option></select></div>
     <div id="results-win" class="wrap" style="padding:0"></div>
     <details class="panel">
       <summary>Comment le gagnant est calculé</summary>
@@ -258,8 +261,9 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
       <div class="row"><button id="rank-jeux" class="primary grow">Classer les matchs</button><button id="scan-jeux" class="grow">Value bets jeux</button></div>
       <div id="status-jeux" class="status">« Classer » analyse seul tous les matchs à venir avec les stats de service récentes des joueurs. « Value bets jeux » cherche les cotes trop hautes sur les jeux et handicaps.</div>
     </div>
+    <div class="seg tourfilter" role="group" aria-label="Circuit"></div>
     <div class="row" id="sortrow" hidden><label class="label" for="sortby">Trier par</label>
-      <select id="sortby"><option value="s1">1er set à 10 jeux ou plus</option><option value="est">Jeux du match</option><option value="aces">Aces attendus</option></select></div>
+      <select id="sortby"><option value="s1">1er set à 10 jeux ou plus</option><option value="est">Jeux du match</option><option value="aces">Aces attendus</option><option value="speed">Plus gros écart de vitesse de service</option></select></div>
     <div id="results-jeux" class="wrap" style="padding:0"></div>
   </section>
 
@@ -448,7 +452,7 @@ function analyse(events,minEdge){
 }
 
 function render(list,demo,target,cat){
-  const r=$(target||"results");
+  const r=$(target||"results");const n0=list.length;list=list.filter(m=>tourOK(m.tour));if(n0&&!list.length){r.innerHTML=`<div class="panel"><b>Aucun match ${tourFilter==="wta"?"féminin":"masculin"} dans cette recherche.</b><span class="note">Choisis « Tous » pour revoir les ${n0} match(s).</span></div>`;return}
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun value bet au-dessus du seuil.</b><span class="note">Normal : ils sont rares et partent vite. Réessaie plus tard ou baisse le seuil.</span></div>';return}
   r.innerHTML=list.map((m,i)=>{
     const d=new Date(m.start);
@@ -797,11 +801,11 @@ function rankMatches(events){
 }
 let lastRank=[];
 function sortRank(list){
-  const k=$("sortby").value,v=m=>{const s=m.sv;if(k==="s1")return s?s.s1:-1;if(k==="aces")return s?Math.max(s.acesA,s.acesB):-1;return m.est};
+  const k=$("sortby").value,v=m=>{const s=m.sv;if(k==="speed")return speedGap(m.a,m.b);if(k==="s1")return s?s.s1:-1;if(k==="aces")return s?Math.max(s.acesA,s.acesB):-1;return m.est};
   return list.slice().sort((x,y)=>v(y)-v(x));
 }
 function renderRank(list){
-  const r=$("results-jeux");
+  const r=$("results-jeux");const n0=list.length;list=list.filter(m=>tourOK(m.tour));if(n0&&!list.length){r.innerHTML=`<div class="panel"><b>Aucun match ${tourFilter==="wta"?"féminin":"masculin"} dans cette recherche.</b><span class="note">Choisis « Tous » pour revoir les ${n0} match(s).</span></div>`;return}
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec une ligne de jeux pour l\'instant.</b><span class="note">Pinnacle publie souvent les lignes de jeux la veille du match. Réessaie plus tard.</span></div>';return}
   r.innerHTML=list.map((m,i)=>{const d=new Date(m.start);
     const when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric"})+" "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
@@ -1013,7 +1017,7 @@ function analyseWinners(events,minEdge){
 let lastWin=[];
 function sortWin(list){
   const k=$("win-sort").value;
-  const f={conf:m=>m.pW,value:m=>m.val?m.val.edge:-1+m.pW/10,agree:m=>(m.agree?1:m.agree===false?-1:0)+m.pW,time:m=>-new Date(m.start).getTime()}[k];
+  const f={conf:m=>m.pW,value:m=>m.val?m.val.edge:-1+m.pW/10,agree:m=>(m.agree?1:m.agree===false?-1:0)+m.pW,time:m=>-new Date(m.start).getTime(),speed:m=>speedGap(m.a,m.b)}[k];
   return list.slice().sort((x,y)=>f(y)-f(x));
 }
 const surn=n=>esc(n.split(" ").pop());
@@ -1161,7 +1165,7 @@ function breakdown(m){
 }
 const winSel=(m,sd)=>selBtn({sid:m.id+"|"+sd.player+"|"+sd.book,mid:m.id,label:sd.player,short:surname(sd.player)+" · "+sd.book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:sd.book,price:sd.price,p:sd.p,link:sd.link,copy:surname(sd.player),cat:"gagnant",value:sd.edge>=+$("minedge").value});
 function renderWin(list){
-  const r=$("results-win");
+  const r=$("results-win");const n0=list.length;list=list.filter(m=>tourOK(m.tour));if(n0&&!list.length){r.innerHTML=`<div class="panel"><b>Aucun match ${tourFilter==="wta"?"féminin":"masculin"} dans cette recherche.</b><span class="note">Choisis « Tous » pour revoir les ${n0} match(s).</span></div>`;return}
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec des cotes Pinnacle pour l\'instant.</b><span class="note">Réessaie un peu plus tard.</span></div>';return}
   r.innerHTML=list.map((m,i)=>{
     const d=new Date(m.start),when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})+" · "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
@@ -1423,6 +1427,17 @@ renderSlipBar();
 
 function setTab(t){for(const k of ["scan","win","jeux","comp","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-win").onclick=()=>setTab("win");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
+// Circuit : tous, hommes (ATP) ou femmes (WTA), mémorisé et commun aux onglets Value, Gagnant et Jeux
+let tourFilter=store.get("vbt_tour","all");
+const tourOK=t=>tourFilter==="all"||(/WTA/i.test(t||"")?tourFilter==="wta":tourFilter==="atp");
+function renderTourFilters(){
+  document.querySelectorAll(".tourfilter").forEach(box=>{
+    box.innerHTML=[["all","Tous"],["atp","Hommes"],["wta","Femmes"]].map(([k,l])=>`<button type="button" data-tour="${k}" aria-pressed="${tourFilter===k}">${l}</button>`).join("");
+    box.querySelectorAll("button").forEach(b=>b.onclick=()=>{tourFilter=b.dataset.tour;store.set("vbt_tour",tourFilter);renderTourFilters();refreshAll();if(lastRank.length&&store.get("vbt_jeux_last",null)!=="rank")renderRank(sortRank(lastRank))});
+  });
+}
+// Écart de vitesse moyenne de service entre les deux joueurs (km/h), -1 si inconnu
+function speedGap(a,b){const x=speedInfo(a,statCache[a]),y=speedInfo(b,statCache[b]);return x&&y?Math.abs(x.kmh-y.kmh):-1}
 function refreshAll(){
   if(!showScan())showDemo();
   showWin();
@@ -1439,7 +1454,7 @@ function renderMyBooks(){
   });
 }
 $("scan").onclick=scan;$("demo").onclick=showDemo;$("minedge").onchange=refreshAll;
-loadRuns();renderMyBooks();refreshAll();renderBets();
+loadRuns();renderMyBooks();renderTourFilters();refreshAll();renderBets();
 </script>
 </body>
 </html>
