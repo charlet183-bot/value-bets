@@ -102,6 +102,12 @@ button:disabled{opacity:.5;cursor:default}
 .bar i{position:absolute;inset:0 auto 0 0;background:var(--clay)}
 .bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--fg)}
 details summary{cursor:pointer;font-weight:600}
+/* Liens bookmakers */
+.go{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.gobtn{display:inline-flex;align-items:center;gap:4px;font:600 14px/1 var(--f-body);color:var(--bg);background:var(--fg);border-radius:8px;padding:9px 12px;text-decoration:none}
+.gobtn:focus-visible{outline:2px solid var(--clay);outline-offset:2px}
+.golab{font-size:12px;color:var(--muted)}
+.acts .gobtn{padding:7px 10px;font-size:13px}
 /* Onglet Gagnant */
 .pick{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .pick b{font:700 20px/1.1 var(--f-display);text-transform:uppercase;letter-spacing:.02em}
@@ -244,6 +250,7 @@ details summary{cursor:pointer;font-weight:600}
       <label class="label" for="sh-stake">Mise €</label>
       <input id="sh-stake" class="num" type="number" step="0.5" inputmode="decimal" style="width:90px">
     </div>
+    <div id="sh-go" class="acts"></div>
     <p class="note">Corrige la cote si elle a bougé chez le bookmaker.</p>
     <div class="row"><button id="sh-cancel" class="grow">Annuler</button><button id="sh-ok" class="primary grow">Enregistrer</button></div>
   </div>
@@ -287,6 +294,16 @@ $("apikey").value=store.get("vbt_key","");
 $("savekey").onclick=()=>{store.set("vbt_key",$("apikey").value.trim());setStatus("Clé enregistrée sur cet appareil.")};
 function setStatus(t,err){$("status").textContent=t;$("status").className="status"+(err?" err":"")}
 
+// Liens vers les bookmakers : page du pari si l'API la fournit, sinon page tennis du site
+const HOME={Winamax:"https://www.winamax.fr/paris-sportifs/sports/5",Betclic:"https://www.betclic.fr/tennis-s2",Unibet:"https://www.unibet.fr/sport/tennis","Parions Sport":"https://www.enligne.parionssport.fdj.fr/",PMU:"https://paris.pmu.fr/",NetBet:"https://www.netbet.fr/"};
+const safeUrl=u=>typeof u==="string"&&/^https:\/\//i.test(u)?u:null;
+const lk=(o,m,b)=>safeUrl(o&&o.link)||safeUrl(m&&m.link)||safeUrl(b&&b.link)||null;
+function goHtml(book,link,copy){
+  const url=safeUrl(link)||HOME[book];if(!url)return"";
+  return `<a class="gobtn" href="${esc(url)}" target="_blank" rel="noopener"${link?"":` data-copy="${esc(copy||"")}"`}>Ouvrir ${esc(book)} ↗</a>${link?"":`<span class="golab">Page tennis · ${copy?"nom copié, colle-le dans la recherche":"cherche le match"}</span>`}`;
+}
+document.addEventListener("click",e=>{const a=e.target.closest&&e.target.closest("a.gobtn[data-copy]");if(a&&a.dataset.copy){try{navigator.clipboard.writeText(a.dataset.copy)}catch(_){}}});
+
 // Calcul : probabilité juste Pinnacle (marge retirée), puis avantage des books FR
 function analyse(events,minEdge){
   const out=[];
@@ -304,7 +321,7 @@ function analyse(events,minEdge){
       for(const o of m.outcomes){
         const p=fair[o.name]; if(!p)continue;
         const edge=o.price*p-1;
-        if(edge>=minEdge)hits.push({book:BOOKS[b.key],player:o.name,price:o.price,p,edge});
+        if(edge>=minEdge)hits.push({book:BOOKS[b.key],player:o.name,price:o.price,p,edge,link:lk(o,m,b)});
       }
     }
     if(hits.length){
@@ -326,8 +343,8 @@ function render(list,demo,target,cat){
     return `<div class="match hit"><div class="mhead"><span>${esc(m.tour)}</span><span>${when}${demo?' <span class="chip demo">Exemple</span>':""}</span></div>
     <div class="players">${esc(m.players)}</div>
     ${m.hits.map((h,j)=>`<div class="vb"><div class="who"><b>${esc(h.player)}</b><small>${esc(h.book)} · cote <span class="num">${odd(h.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/h.p)}</span> · proba ${pct(h.p)}</div></div>
-      <span class="edge">+${pct(h.edge)}</span><button class="small" data-m="${i}" data-h="${j}">Parier</button></div>`).join("")}</div>`}).join("");
-  r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo,cat:cat||"value"})});
+      <span class="edge">+${pct(h.edge)}</span><button class="small" data-m="${i}" data-h="${j}">Parier</button>${demo?"":`<div class="go">${goHtml(h.book,h.link,surname(h.player))}</div>`}</div>`).join("")}</div>`}).join("");
+  r.querySelectorAll("button[data-m]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.m],h=m.hits[b.dataset.h];openSheet({match:m.players,tour:m.tour,start:m.start,player:h.player,book:h.book,price:h.price,p:h.p,demo:!!demo,cat:cat||"value",link:h.link,copy:surname(m.players.split(" – ")[0])})});
 }
 
 async function scan(){
@@ -345,7 +362,7 @@ async function scan(){
     let all=[],left="?";
     for(const s of sports){
       setStatus("Lecture des cotes : "+s.title+"…");
-      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h&oddsFormat=decimal`);
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h&oddsFormat=decimal&includeLinks=true`);
       left=r.headers.get("x-requests-remaining")||left;
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
@@ -389,7 +406,7 @@ function analyseGames(events,minEdge){
         for(const o of m.outcomes){
           const k=m.key+"|"+o.name+"|"+o.point,p=fair[k];if(!p)continue;
           const edge=o.price*p-1;
-          if(edge>=minEdge&&(!best[k]||edge>best[k].edge))best[k]={book:BOOKS[b.key],player:labelOf(m.key,o),price:o.price,p,edge};
+          if(edge>=minEdge&&(!best[k]||edge>best[k].edge))best[k]={book:BOOKS[b.key],player:labelOf(m.key,o),price:o.price,p,edge,link:lk(o,m,b)};
         }
       }
     }
@@ -411,7 +428,7 @@ async function scanGames(){
     const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
     for(const s of sports){
       st("Lecture des lignes : "+s.title+"…");
-      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=totals,spreads&oddsFormat=decimal`);
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=totals,spreads&oddsFormat=decimal&includeLinks=true`);
       left=r.headers.get("x-requests-remaining")||left;
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
@@ -541,7 +558,7 @@ function rankMatches(events){
     let best=null;
     for(const b of books){if(!BOOKS[b.key])continue;const m=b.markets.find(x=>x.key==="totals");if(!m)continue;
       for(const o of m.outcomes){if(o.name!=="Over")continue;const f=lines.find(l=>l.pt===o.point);if(!f)continue;
-        const edge=o.price*f.pOver-1;if(!best||edge>best.edge)best={book:BOOKS[b.key],pt:o.point,price:o.price,p:f.pOver,edge}}}
+        const edge=o.price*f.pOver-1;if(!best||edge>best.edge)best={book:BOOKS[b.key],pt:o.point,price:o.price,p:f.pOver,edge,link:lk(o,m,b)}}}
     out.push({ev,tour:ev.sport_title,start:ev.commence_time,a:h.outcomes[0].name,b:h.outcomes[1].name,pa,line:L.pt,pOver:L.pOver,est,bal:1-Math.abs(pa-(1-pa)),best});
   }
   return out.sort((x,y)=>y.est-x.est);
@@ -565,8 +582,8 @@ function renderRank(list){
       <div><div class="mhead"><span>${esc(m.tour)}</span><span>${when}</span></div><div class="players">${esc(m.a)} – ${esc(m.b)}</div></div>
       ${svHtml}
       <div class="meta"><span>Jeux attendus <b>${m.est.toFixed(1).replace(".",",")}</b></span><span>Ligne <b>${String(m.line).replace(".",",")}</b></span><span>Équilibre <span class="meter"><i style="width:${(m.bal*100).toFixed(0)}%"></i></span> ${esc(fav[0])} ${pct(fav[1])}</span></div>
-      <div class="acts">${bb}${m.best&&m.best.edge>0?`<button class="small" data-r="${i}">Parier</button>`:""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
-  r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux"})});
+      <div class="acts">${bb}${m.best&&m.best.edge>0?`<button class="small" data-r="${i}">Parier</button>`:""}${m.best?goHtml(m.best.book,m.best.link,surname(m.a)):""}<button class="small" data-c="${i}">Comparer</button></div></div>`}).join("");
+  r.querySelectorAll("button[data-r]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.r];openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:"Plus de "+String(m.best.pt).replace(".",",")+" jeux",book:m.best.book,price:m.best.price,p:m.best.p,demo:false,cat:"jeux",link:m.best.link,copy:surname(m.a)})});
   r.querySelectorAll("button[data-c]").forEach(b=>b.onclick=()=>{const m=list[b.dataset.c];$("c-na").value=m.a;$("c-nb").value=m.b;$("c-mk").value="match";$("c-ou").value="over";$("c-line").value=m.best?m.best.pt:m.line;$("c-odds").value=m.best?m.best.price:"";
     if(m.sv){$("c-ha").value=(m.sv.A.hold*100).toFixed(1);$("c-hb").value=(m.sv.B.hold*100).toFixed(1);setTab("comp");runComp()}
     else{setTab("comp");$("c-out").innerHTML='<span class="note">Entre le % de service gagné des deux joueurs puis appuie sur Calculer.</span>'}
@@ -585,7 +602,7 @@ async function rankGames(){
     const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
     for(const s of sports){
       st("Lecture des matchs : "+s.title+"…");
-      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h,totals&oddsFormat=decimal`);
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h,totals&oddsFormat=decimal&includeLinks=true`);
       left=r.headers.get("x-requests-remaining")||left;
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
@@ -687,7 +704,7 @@ function analyseWinners(events,minEdge){
     const best=[null,null];
     for(const bk of books){
       if(!BOOKS[bk.key])continue;const m=bk.markets.find(x=>x.key==="h2h");if(!m)continue;
-      for(const o of m.outcomes){const i=o.name===a?0:o.name===b?1:-1;if(i<0)continue;if(!best[i]||o.price>best[i].price)best[i]={book:BOOKS[bk.key],price:o.price}}
+      for(const o of m.outcomes){const i=o.name===a?0:o.name===b?1:-1;if(i<0)continue;if(!best[i]||o.price>best[i].price)best[i]={book:BOOKS[bk.key],price:o.price,link:lk(o,m,bk)}}
     }
     const probs=[pFin,1-pFin];
     const sides=[0,1].map(i=>best[i]?{...best[i],p:probs[i],edge:best[i].price*probs[i]-1,player:i?b:a}:null);
@@ -751,13 +768,13 @@ function renderWin(list){
     const tag=!m.st?'<span class="tag mid">Stats manquantes</span>':m.pW<.56?'<span class="tag mid">Match serré</span>':m.agree&&m.pW>=.65?'<span class="tag ok">Accord fort</span>':m.agree?'<span class="tag mid">D\'accord</span>':'<span class="tag no">Désaccord</span>';
     const bars=`<div class="split"><span></span><div class="who2"><span>${surn(m.a)}</span><span>${surn(m.b)}</span></div>${m.st?sbar("Stats",m.st.p,m.a,m.b):""}${sbar("Pinnacle",m.pPin,m.a,m.b)}${m.st?sbar("Combiné",m.pFin,m.a,m.b):""}</div>`;
     const ws=m.sides[m.w];
-    const val=m.val?`<div class="vb"><div class="who"><b>${esc(m.val.player)}</b><small>${esc(m.val.book)} · cote <span class="num">${odd(m.val.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/m.val.p)}</span> · proba ${pct(m.val.p)}</div></div><span class="edge">+${pct(m.val.edge)}</span><button class="small" data-w="${i}">Parier</button></div>`
-      :`<span class="note">${ws?`Meilleure cote pour ${surn(wn)} : ${esc(ws.book)} à <b class="num">${odd(ws.price)}</b>, cote juste ${odd(1/ws.p)} (${ws.edge>=0?"+":"−"}${pct(Math.abs(ws.edge))}). Pas assez pour parier.`:"Pas encore de cote chez les books français."}</span>`;
+    const val=m.val?`<div class="vb"><div class="who"><b>${esc(m.val.player)}</b><small>${esc(m.val.book)} · cote <span class="num">${odd(m.val.price)}</span></small><div class="fair">Cote juste <span class="num">${odd(1/m.val.p)}</span> · proba ${pct(m.val.p)}</div></div><span class="edge">+${pct(m.val.edge)}</span><button class="small" data-w="${i}">Parier</button><div class="go">${goHtml(m.val.book,m.val.link,surname(m.val.player))}</div></div>`
+      :`<span class="note">${ws?`Meilleure cote pour ${surn(wn)} : ${esc(ws.book)} à <b class="num">${odd(ws.price)}</b>, cote juste ${odd(1/ws.p)} (${ws.edge>=0?"+":"−"}${pct(Math.abs(ws.edge))}). Pas assez pour parier.`:"Pas encore de cote chez les books français."}</span>${ws?`<div class="acts">${goHtml(ws.book,ws.link,surname(wn))}</div>`:""}`;
     return `<div class="match${m.val?" hit":""}"><div class="mhead"><span>${esc(m.tour)}${m.bo5?" · 5 sets":""}</span><span>${when}</span></div>
       <div class="players">${esc(m.a)} – ${esc(m.b)}</div>
       <div class="pick"><div><div class="label">Gagnant probable</div><b>${esc(wn)}</b></div><div style="text-align:right">${tag}<div class="big">${pct(m.pW)}</div></div></div>
       ${bars}${alerts(m)}${val}${cmpTable(m)}</div>`}).join("");
-  r.querySelectorAll("button[data-w]").forEach(btn=>btn.onclick=()=>{const m=list[btn.dataset.w],v=m.val;openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:v.player,book:v.book,price:v.price,p:v.p,demo:false,cat:"gagnant"})});
+  r.querySelectorAll("button[data-w]").forEach(btn=>btn.onclick=()=>{const m=list[btn.dataset.w],v=m.val;openSheet({match:m.a+" – "+m.b,tour:m.tour,start:m.start,player:v.player,book:v.book,price:v.price,p:v.p,demo:false,cat:"gagnant",link:v.link,copy:surname(v.player)})});
 }
 async function runWinners(){
   const key=$("apikey").value.trim(),st=(t,e)=>{$("status-win").textContent=t;$("status-win").className="status"+(e?" err":"")};
@@ -772,7 +789,7 @@ async function runWinners(){
     const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
     for(const s of sports){
       st("Lecture des cotes : "+s.title+"…");
-      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h&oddsFormat=decimal`);
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h&oddsFormat=decimal&includeLinks=true`);
       left=r.headers.get("x-requests-remaining")||left;
       if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
       if(r.ok)all=all.concat(await r.json());
@@ -806,7 +823,8 @@ function demoData(){
 function showDemo(){render(analyse(demoData(),+$("minedge").value),true);setStatus("Exemple fictif (joueurs inventés). Ajoute ta clé pour les vraies cotes.")}
 
 // Suivi des paris
-function openSheet(b){pending=b;$("sh-title").textContent=b.player+" chez "+b.book;$("sh-odds").value=b.price.toFixed(2);$("sh-stake").value=$("stake").value||5;$("sheet").hidden=false}
+const surname=n=>String(n||"").trim().split(/\s+/).pop();
+function openSheet(b){pending=b;$("sh-title").textContent=b.player+" chez "+b.book;$("sh-go").innerHTML=b.demo?"":goHtml(b.book,b.link,b.copy);$("sh-odds").value=b.price.toFixed(2);$("sh-stake").value=$("stake").value||5;$("sheet").hidden=false}
 $("sh-cancel").onclick=()=>{$("sheet").hidden=true;pending=null};
 $("sh-ok").onclick=()=>{
   if(!pending){$("sheet").hidden=true;return}
@@ -831,7 +849,7 @@ function renderBets(){
   L.innerHTML=bets.map(b=>`<div class="bet"><div class="top"><b>${esc(b.player)}</b><span class="st ${b.status}">${lab[b.status]}</span></div>
   <div class="note"><span class="chip">${CATS[b.cat||"value"]}</span> ${esc(b.match)} · ${esc(b.book)}${b.demo?' · <span class="chip demo">Exemple</span>':""}</div>
   <div class="row num" style="font-size:14px">Cote ${odd(b.price)} · Mise ${eur(b.stake)}${b.edge!=null?' · Avantage '+pct(b.edge):''}${b.status!=="open"?" · "+eur(profit(b)):""}</div>
-  <div class="row">${b.status==="open"?`<button class="small" data-s="won" data-id="${b.id}">Gagné</button><button class="small" data-s="lost" data-id="${b.id}">Perdu</button><button class="small" data-s="void" data-id="${b.id}">Annulé</button>`:`<button class="small" data-s="open" data-id="${b.id}">Rouvrir</button>`}<button class="small" data-del="${b.id}">Supprimer</button></div></div>`).join("");
+  <div class="row">${b.status==="open"&&!b.demo&&(b.link||HOME[b.book])?goHtml(b.book,b.link,b.copy||surname(String(b.match).split(" – ")[0])):""}${b.status==="open"?`<button class="small" data-s="won" data-id="${b.id}">Gagné</button><button class="small" data-s="lost" data-id="${b.id}">Perdu</button><button class="small" data-s="void" data-id="${b.id}">Annulé</button>`:`<button class="small" data-s="open" data-id="${b.id}">Rouvrir</button>`}<button class="small" data-del="${b.id}">Supprimer</button></div></div>`).join("");
   L.querySelectorAll("button[data-s]").forEach(x=>x.onclick=()=>{const b=bets.find(b=>b.id===x.dataset.id);b.status=x.dataset.s;store.set("vbt_bets",bets);renderBets()});
   L.querySelectorAll("button[data-del]").forEach(x=>x.onclick=()=>{
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
