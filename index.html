@@ -1483,7 +1483,7 @@ function renderBets(){
     if(x.dataset.confirm){bets=bets.filter(b=>b.id!==x.dataset.del);store.set("vbt_bets",bets);renderBets()}
     else{x.dataset.confirm="1";x.textContent="Confirmer ?"}});
 }
-const CATS={value:"Value bets",combine:"Combinés",gagnant:"Gagnant",jeux:"Value jeux",comp:"Comparateur",aces:"Aces",feeling:"Feeling",autre:"Autre"};
+const CATS={value:"Value bets",combine:"Combinés",gagnant:"Gagnant",jeux:"Value jeux",set1:"1er set",comp:"Comparateur",aces:"Aces",feeling:"Feeling",autre:"Autre"};
 function renderCats(){
   const box=$("catstats"),rows=[];
   for(const c of Object.keys(CATS)){
@@ -1654,10 +1654,68 @@ async function openMatch(o){
   if(!m){const A=statCache[a],B=statCache[b],wta=/WTA/i.test(o.tour||"")||!!(A&&A.elo&&/wta/i.test(A.elo.tour)),bo5=!!o.bo5;
     const h2h=h2hCache[pairKey([a,b])]||null,st=A&&B&&A.spw!=null&&B.spw!=null?statModel(A,B,wta,bo5,h2h):null;
     m={a,b,A,B,st,pPin:null,pFin:st?st.p:null,bo5,h2h,sides:[null,null],val:null,tour:o.tour,start:o.start,id:o.id,agree:null}}
+  m.ev=ev||null;CUR_MATCH=m;
   $("a-body").innerHTML=analysisHtml(m,o);
   $("a-body").querySelectorAll("details").forEach(d=>d.addEventListener("toggle",()=>{}));
   syncOdds&&syncOdds();
 }
+
+// ===== 1er set au coupon : +9,5 et +10,5 jeux (vraies cotes à la demande, ou cote saisie à la main)
+let CUR_MATCH=null;
+const S1_LINES=[9.5,10.5];
+function set1Sel(m,L,book,price,p,link,src){
+  const lab=`1er set +${String(L).replace(".",",")} jeux`;
+  return{sid:(m.id||m.a+m.b)+"|S1+"+L+"|"+book,mid:m.id||(m.a+"|"+m.b),label:lab,short:lab.replace("1er set ","1er set ")+" · "+book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book,price,p,link,copy:surname(m.a),cat:"set1",value:src==="pin"&&price*p-1>=+$("minedge").value};
+}
+function set1Block(m,d1){
+  const saved=(RUNS.all&&RUNS.all.set1&&m.id&&RUNS.all.set1[m.id])||null;
+  const rows=S1_LINES.map(L=>{const pm=overOf(d1,L);
+    let real="";
+    if(saved){const pin=saved.pin[L],mine=(saved.mine||[]).filter(x=>x.L===L);
+      real=mine.length?mine.map(x=>{const p=pin!=null?pin:pm,src=pin!=null?"pin":"model",sel=set1Sel(m,L,x.book,x.price,p,x.link,src),e=x.price*p-1;
+        return `${selBtn(sel)}<small>${esc(x.book)} · ${e>=0?"+":"−"}${pct(Math.abs(e))} ${src==="pin"?"vs Pinnacle":"vs modèle"}</small>`}).join(""):`<small>Pas de cote +${String(L).replace(".",",")} chez tes bookmakers.</small>`;
+      if(pin!=null)real+=`<small>Prix juste Pinnacle ${odd(1/pin)} (${pct(pin)})</small>`}
+    return `<tr><th style="text-align:left">+${String(L).replace(".",",")} jeux<br><small>modèle ${pct(pm)} · cote juste ${odd(1/pm)}</small></th>
+      <td style="width:55%"><div style="display:grid;gap:4px;justify-items:end">${real}
+      <div class="row" style="justify-content:flex-end;gap:4px"><input class="num s1in" data-l="${L}" type="text" inputmode="decimal" placeholder="cote" style="width:74px"><button class="small s1add" data-l="${L}" type="button">+ Coupon</button></div></div></td></tr>`}).join("");
+  const canLoad=m.ev&&m.ev.sport_key&&!saved;
+  return `<details class="grp" open><summary>1er set : ajouter au coupon</summary>
+    <table class="cmp"><tbody>${rows}</tbody></table>
+    ${canLoad?`<button id="s1load" type="button">Charger les vraies cotes du 1er set (≈ 1 crédit)</button>`:""}
+    <p class="note" style="margin:4px 0 0">${saved?`Cotes du 1er set chargées ${ago(saved.at)}. `:""}Value calculée contre Pinnacle quand il propose la ligne, sinon contre le modèle (moins fiable : le modèle trouve le bon côté ~57 % du temps). Si ton bookmaker n'est pas couvert, tape sa cote et ajoute-la au coupon.</p></details>`;
+}
+async function loadSet1(){
+  const m=CUR_MATCH,key=$("apikey").value.trim();if(!m||!m.ev)return;
+  if(!key){$("all-settings").open=true;alertNote("Ajoute ta clé dans ⚙ Réglages.");return}
+  const btn=$("s1load");if(btn){btn.disabled=true;btn.textContent="Chargement…"}
+  try{
+    const bk=[SHARP,...Object.keys(BOOKS)].join(",");
+    const r=await fetch(`${API}/sports/${m.ev.sport_key}/events/${m.ev.id}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=totals_s1&oddsFormat=decimal&includeLinks=true`);
+    if(r.status===422||r.status===404)throw new Error("Marché du 1er set non proposé pour ce match.");
+    if(r.status===429)throw new Error("Quota de crédits épuisé.");
+    if(!r.ok)throw new Error("L'API ne répond pas ("+r.status+").");
+    const ev=await r.json(),books=ev.bookmakers||[],out={at:Date.now(),pin:{},mine:[]};
+    const sh=books.find(b=>b.key===SHARP),smk=sh&&sh.markets.find(x=>x.key==="totals_s1");
+    if(smk)for(const L of S1_LINES){const ov=smk.outcomes.find(o=>o.name==="Over"&&o.point===L),un=smk.outcomes.find(o=>o.name==="Under"&&o.point===L);if(ov&&un){const a=1/ov.price,b=1/un.price;out.pin[L]=a/(a+b)}}
+    for(const b of books){if(!isMine(b.key))continue;const mk=b.markets.find(x=>x.key==="totals_s1");if(!mk)continue;
+      for(const o of mk.outcomes)if(o.name==="Over"&&S1_LINES.includes(o.point))out.mine.push({L:o.point,book:BOOKS[b.key],price:o.price,link:lk(o,mk,b)})}
+    if(RUNS.all){RUNS.all.set1=RUNS.all.set1||{};RUNS.all.set1[m.ev.id]=out;saveRun("all",RUNS.all)}
+    else{RUNS.all={at:Date.now(),events:[],left:"?",set1:{[m.ev.id]:out}}}
+    if(!Object.keys(out.pin).length&&!out.mine.length)throw new Error("Aucun bookmaker ne propose encore le total du 1er set pour ce match.");
+    $("a-body").innerHTML=analysisHtml(m,{});
+  }catch(e){if(btn){btn.disabled=false;btn.textContent="Charger les vraies cotes du 1er set (≈ 1 crédit)"}alertNote(e.message||"Erreur de chargement.")}
+}
+function alertNote(t){const b=$("a-body");if(b)b.insertAdjacentHTML("afterbegin",`<p class="err" style="margin:0">${esc(t)}</p>`)}
+document.addEventListener("click",e=>{
+  if(e.target.id==="s1load"){loadSet1();return}
+  const b=e.target.closest&&e.target.closest("button.s1add");if(!b||!CUR_MATCH)return;
+  const L=+b.dataset.l,inp=b.parentElement.querySelector("input.s1in"),price=parseFloat(String(inp.value).replace(",","."));
+  if(!(price>1)){inp.focus();inp.style.borderColor="var(--bad)";return}
+  const m=CUR_MATCH,p=CUR_MATCH.__s1&&CUR_MATCH.__s1[L];if(p==null)return;
+  const sel=set1Sel(m,L,BOOKS[myBooks[0]]||"Winamax",price,p,null,"model");
+  if(!slip.some(x=>x.sid===sel.sid)){SELS[sel.sid]=sel;toggleSel(sel.sid,b)}else{const i=slip.findIndex(x=>x.sid===sel.sid);slip[i]={...sel};saveSlip();renderSlipBar(true)}
+  b.textContent="✓ Ajouté";setTimeout(()=>{b.textContent="+ Coupon"},1500);
+});
 function analysisHtml(m,o){
   const A=m.A,B=m.B,a=m.a,b=m.b,sa=surn(a),sb=surn(b);
   if(!A||!B||!m.st){
@@ -1725,7 +1783,8 @@ function analysisHtml(m,o){
   // ---------- 4. paris possibles
   const bets=ws&&ws.length?`<div class="label">Parier</div><div class="oddrow">${m.sides.map(sd=>sd?winSel(m,sd):`<span class="odd none">–</span>`).join("")}</div>${vbest?`<div class="vb"><div class="who"><b>Value : ${esc(vbest.player)}</b><small>${esc(vbest.book)} · cote <span class="num">${odd(vbest.price)}</span> · cote juste Pinnacle ${odd(1/pinP(vbest))}</small></div><span class="edge">+${pct(vbest.pe)}</span><div class="go">${goHtml(vbest.book,vbest.link,surname(vbest.player))}</div></div>`:`<p class="note" style="margin:0">Pas de cote au-dessus du prix juste de Pinnacle (seuil ${pct(+$("minedge").value)}). Cote juste du pronostic : ${odd(1/pw)} pour ${esc(surn(wn))}.</p>`}`:"";
   const warn=`<p class="note" style="margin:0">Même à ${pct(pw)}, ${esc(wn)} perd ${pct(1-pw)} du temps. Ce pronostic n'est pas une garantie.</p>`;
-  return prono+analyse+calc+bets+warn+(m.h2h!==undefined?cmpTable({...m,a,b}):"");
+  m.__s1=Object.fromEntries(S1_LINES.map(L=>[L,overOf(d1,L)]));
+  return prono+analyse+calc+bets+set1Block(m,d1)+warn+(m.h2h!==undefined?cmpTable({...m,a,b}):"");
 }
 $("a-close").onclick=()=>{$("asheet").hidden=true};
 $("asheet").addEventListener("click",e=>{if(e.target.id==="asheet")$("asheet").hidden=true});
