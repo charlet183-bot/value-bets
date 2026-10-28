@@ -273,7 +273,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
     <div class="panel">
       <div class="row">
         <input id="apikey" class="grow" type="password" placeholder="Clé The Odds API" autocomplete="off">
-        <button id="savekey" class="small">Enregistrer</button>
+        <button id="showkey" class="small" type="button" aria-label="Afficher la clé">👁</button><button id="savekey" class="small">Enregistrer</button>
       </div>
       <div class="row">
         <label class="label" for="minedge">Avantage min.</label>
@@ -462,6 +462,7 @@ const odd=n=>n.toFixed(2).replace(".",",");
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 $("apikey").value=store.get("vbt_key","");
+$("showkey").onclick=()=>{const i=$("apikey");i.type=i.type==="password"?"text":"password";$("showkey").textContent=i.type==="password"?"👁":"🙈"};
 $("savekey").onclick=()=>{store.set("vbt_key",$("apikey").value.trim());setStatus("Clé enregistrée sur cet appareil.")};
 function setStatus(t,err){$("status").textContent=t;$("status").className="status"+(err?" err":"")}
 
