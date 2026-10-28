@@ -21,3 +21,8 @@ Les coefficients sont recopiés dans `index.html` (constantes `GCAL` et `ACECAL`
 - `set1.py` → distribution complète des jeux du 1er set (modèle ordinal). Erreur sur la distribution 1,799 → 1,737 ; ligne 9,5 : ~57 % de bon sens. Habitudes des joueurs, Elo et cote Pinnacle n'ajoutent presque rien.
 - `career_all.py` → total de jeux, jeux par joueur (61,8 → 62,5 %), aces (3,18 → 3,10 d'erreur), vainqueur par le service (0,651 → 0,628).
 - `learned2.py` → poids du vainqueur réappris avec le service carrière : 64,8 → 65,1 % sur 2024-26.
+
+## Saison en cours seulement (28/10/2026, à la demande)
+Les calculs utilisent la saison en cours (circuit + Challengers, 600 points d'a priori) mélangée à 50 % avec la forme récente et la surface, au lieu de toute la carrière.
+Test 2024-26 (`season_eval.py`, `*_saison.py`) : erreur service 48,1 (carrière 47,4 ; ancienne appli 50,4). Faible en janvier-mars (peu de matchs).
+1er set : distribution 1,740 (ancienne 1,799) ; jeux par joueur 62,6 % ; aces 3,14 ; vainqueur 64,9 %.

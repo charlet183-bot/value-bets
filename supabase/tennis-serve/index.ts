@@ -3,6 +3,7 @@
 //   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
 // v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
 //      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
+// v8 : stats de la saison en cours pour les calculs (career.season).
 // v7 : toute la carrière (saisons circuit + Challengers, surfaces) ; jeux du 1er set des derniers matchs.
 // v6 : lit aussi les autres tableaux de la page Tennis Abstract : bilans sur 52 semaines (surface, niveau,
 //      contre gauchers/droitiers), face-à-face de toute la carrière, vitesse de service (mph).
@@ -194,6 +195,8 @@ function careerStats(js: string, wta: boolean) {
   const now = new Date(), t = now.getUTCFullYear() + (now.getTime() - Date.UTC(now.getUTCFullYear(), 0, 1)) / (365 * DAY);
   const years: Record<string, unknown>[] = [];
   let sw = 0, sv = 0, rw = 0, rv = 0, aw = 0, games = 0, sets = 0, tbs = 0, hw = 0, bw = 0, wsum = 0, m = 0, msAll = 0;
+  // Saison en cours seulement (utilisée pour les calculs)
+  const S = { sw: 0, sv: 0, rw: 0, aw: 0, hw: 0, bw: 0, w: 0, games: 0, sets: 0, tbs: 0, m: 0, ms: 0 };
   for (const [id, lvl] of [["tour-years", "tour"], ["chall-years", "chall"]] as const) {
     const tb = table(js, id);
     if (!tb) continue;
@@ -209,6 +212,15 @@ function careerStats(js: string, wta: boolean) {
       const age = y === Math.floor(t) ? (t - y) / 2 : t - (y + 0.5);
       const w = Math.pow(0.5, Math.max(0, age) / HALF_LIFE);
       m += M; msAll += MS;
+      if (y === Math.floor(t)) {
+        S.m += M; S.ms += MS;
+        if (MS > 0 && spw !== null && rpw !== null) {
+          const pts = MS * PTS_PER_MATCH;
+          S.sw += pts * (spw - adj); S.sv += pts; S.rw += pts * (rpw - adj); if (ace !== null) S.aw += pts * ace;
+          if (hold !== null && brk !== null) { S.hw += MS * hold; S.bw += MS * brk; S.w += MS; }
+        }
+        if (st && gm) { S.games += gm[0] + gm[1]; S.sets += st[0] + st[1]; if (tbx) S.tbs += tbx[0] + tbx[1]; }
+      }
       if (MS > 0 && spw !== null && rpw !== null) {
         const pts = MS * PTS_PER_MATCH * w;
         sw += pts * (spw - adj); sv += pts; rw += pts * (rpw - adj); rv += pts;
@@ -221,6 +233,15 @@ function careerStats(js: string, wta: boolean) {
     }
   }
   if (!sv) return null;
+  // Saison en cours : 600 points d'a priori vers la moyenne du circuit (testé sur 2024-2026, model/season_eval.py)
+  const SP = 600;
+  const season = {
+    year: Math.floor(t), matches: S.m, withStats: S.ms,
+    spw: (S.sw + SP * avgS) / (S.sv + SP), rpw: (S.rw + SP * (1 - avgS)) / (S.sv + SP),
+    ace: (S.aw + SP * (wta ? 0.035 : 0.07)) / (S.sv + SP),
+    hold: S.w ? S.hw / S.w : null, brk: S.w ? S.bw / S.w : null,
+    gps: S.sets ? S.games / S.sets : null, tbps: S.sets ? S.tbs / S.sets : null,
+  };
   // Surfaces sur toute la carrière (circuit principal)
   const cs = table(js, "career-splits");
   const surf: Record<string, Record<string, number | null>> = {};
@@ -243,7 +264,7 @@ function careerStats(js: string, wta: boolean) {
     ace: (aw + PRIOR_PTS * (wta ? 0.035 : 0.07)) / (sv + PRIOR_PTS),
     hold: wsum ? hw / wsum : null, brk: wsum ? bw / wsum : null,
     gps: sets ? (games + 5 * 9.6) / (sets + 5) : null, tbps: sets ? (tbs + 5 * 0.2) / (sets + 5) : null,
-    matches: m, withStats: msAll, seasons: new Set(years.map((x) => x.y)).size, years: years.slice(0, 12), surf,
+    season, matches: m, withStats: msAll, seasons: new Set(years.map((x) => x.y)).size, years: years.slice(0, 12), surf,
   };
 }
 
@@ -513,7 +534,7 @@ Deno.serve(async (req) => {
       h2h[a + "|" + b] = { a: c.a, b: c.b, n: c.a + c.b, career: true, tbA: c.tbA, tbN: c.tbN, first: c.first, lastDate: c.last, surf: recent ? recent.surf : {}, last: recent ? recent.last : null };
     } else if (recent) h2h[a + "|" + b] = recent;
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 7, players: res, h2h }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 8, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });
