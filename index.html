@@ -1236,8 +1236,36 @@ function matchListHtml(P,name){
   const ms=seasonM(P);if(!ms.length)return"";
   return `<details class="grp"><summary>Adversaires de ${surn(name)} cette saison (${ms.length})</summary><table class="cmp"><tbody>${ms.map(m=>`<tr><td style="width:22%"><span style="color:${m.w?"var(--good)":"var(--bad)"}">${m.w?"V":"D"}</span><br><small>${esc(String(m.d||"").slice(0,6))}</small></td><th style="text-align:left;width:50%">${esc(m.o||"?")} <small>${rkTxt(m.r)}</small><br><small>${esc(m.t||"")} · ${SURF[m.s]||esc(m.s||"")}</small></th><td style="width:28%">${esc(m.sc||"")}<br><small>service ${m.spw!=null?pct(m.spw):"–"}</small></td></tr>`).join("")}</tbody></table></details>`;
 }
+
+// ===== Retour selon la puissance de service de l'adversaire (information : testé sur 124 000 services,
+// l'écart personnel ne se répète pas d'un match à l'autre, donc il n'entre pas dans le calcul — model/return_power.py)
+function powerBand(n,wta){const v=tableSpeed(n);if(v==null)return null;const [hi,lo]=wta?[170,158]:[195,185];return v>=hi?"big":v>=lo?"mid":"small"}
+const BAND_LAB=w=>({big:`Gros serveurs (≥ ${w?170:195} km/h)`,mid:`Serveurs moyens (${w?"158-170":"185-195"} km/h)`,small:`Petits serveurs (< ${w?158:185} km/h)`});
+function returnByPower(P,wta){
+  const ms=seasonM(P).filter(m=>m.rpw!=null),o={big:[],mid:[],small:[],unk:[]};
+  for(const m of ms)o[powerBand(m.o,wta)||"unk"].push(m);
+  const st=a=>a.length?{n:a.length,w:a.filter(m=>m.w).length,rpw:a.reduce((t,m)=>t+m.rpw,0)/a.length}:null;
+  return{all:st(ms),big:st(o.big),mid:st(o.mid),small:st(o.small),unk:st(o.unk)};
+}
+function powerRows(A,B,na,nb){
+  const wta=!!(A.elo&&/wta/i.test(A.elo.tour)),ra=returnByPower(A,wta),rb=returnByPower(B,wta),lab=BAND_LAB(wta);
+  const bA=powerBand(nb,wta),bB=powerBand(na,wta); // catégorie du serveur d'en face
+  const f=(o,mark)=>o?`${pct(o.rpw)}<br><small>${o.n} m. · ${o.w}/${o.n} V${mark?" · ▸ cas du jour":""}</small>`:"–";
+  const rows=[["Points gagnés au retour (saison, tous)",ra.all&&ra.all.rpw,rb.all&&rb.all.rpw,(v,P)=>f(P===A?ra.all:rb.all),1]];
+  for(const k of ["big","mid","small"])rows.push([lab[k],ra[k]&&ra[k].rpw,rb[k]&&rb[k].rpw,(v,P)=>f(P===A?ra[k]:rb[k],(P===A?bA:bB)===k),1]);
+  const sA=tableSpeed(na),sB=tableSpeed(nb);
+  rows.push(["Vitesse du serveur d'en face",sB,sA,v=>v==null?"inconnue":Math.round(v)+" km/h",0]);
+  return rows;
+}
+function powerSentence(A,B,na,nb){
+  const wta=!!(A.elo&&/wta/i.test(A.elo.tour)),out=[];
+  for(const [P,me,opp] of [[A,na,nb],[B,nb,na]]){const band=powerBand(opp,wta),r=returnByPower(P,wta);if(!band||!r.all||!r[band])continue;
+    const d=r[band].rpw-r.all.rpw,sp=Math.round(tableSpeed(opp));
+    out.push(`${surn(me)} contre des serveurs comme ${surn(opp)} (${sp} km/h) : ${pct(r[band].rpw)} des points de retour sur ${r[band].n} match${r[band].n>1?"s":""}, contre ${pct(r.all.rpw)} en moyenne${r[band].n<5?" (trop peu de matchs pour conclure)":Math.abs(d)<.02?" (pas de différence)":d>0?" (il retourne mieux ce type de service)":" (ce type de service le gêne)"}.`)}
+  return out.length?out.join(" ")+" À titre indicatif : sur l'historique, ces écarts personnels ne se répètent pas d'un match à l'autre.":null;
+}
 function oppHtml(A,B,na,nb){
-  return cmpGroups([["Adversaires de la saison",oppRows(A,B,na,nb)]],na,nb,A,B,true)+commonHtml(A,B,na,nb)+matchListHtml(A,na)+matchListHtml(B,nb);
+  return cmpGroups([["Adversaires de la saison",oppRows(A,B,na,nb)],["Retour selon la puissance du serveur",powerRows(A,B,na,nb)]],na,nb,A,B,true)+commonHtml(A,B,na,nb)+matchListHtml(A,na)+matchListHtml(B,nb);
 }
 function cmpTable(m){
   const A=m.A,B=m.B;if(!A||!B)return"";
@@ -1669,6 +1697,7 @@ function analysisHtml(m,o){
   const ba=band(A,B.rank),bb=band(B,A.rank);if(ba||bb)L.push(`Contre des joueurs du niveau de l'adversaire cette saison : ${sa} ${ba||"aucun match"}, ${sb} ${bb||"aucun match"}.`);
   const ca=seasonM(A),cbm=seasonM(B),keyN=n=>normName(n),setB=new Set(cbm.map(x=>x.o&&keyN(x.o)));const com=[...new Set(ca.filter(x=>x.o&&setB.has(keyN(x.o))).map(x=>keyN(x.o)))];
   if(com.length){const wa=ca.filter(x=>x.o&&com.includes(keyN(x.o))),wb=cbm.filter(x=>x.o&&com.includes(keyN(x.o)));L.push(`${com.length} adversaire${com.length>1?"s":""} en commun cette saison : ${sa} ${wa.filter(x=>x.w).length}/${wa.length}, ${sb} ${wb.filter(x=>x.w).length}/${wb.length}.`)}
+  {const ps=powerSentence(A,B,a,b);if(ps)L.push(ps)}
   const h=m.h2h;if(h&&h.n)L.push(`Face-à-face${h.career?" (carrière)":""} : ${h.a===h.b?`égalité ${h.a}–${h.b}`:`${h.a>h.b?sa:sb} mène ${Math.max(h.a,h.b)}–${Math.min(h.a,h.b)}`}.`);
   for(const [n,P] of [[sa,A],[sb,B]]){const f=fatiguePen(P);if(f.why.length)L.push(`Fatigue / reprise ${n} : ${f.why.join(", ")}.`)}
   if(m.pPin!=null){const d=Math.round((st.p-m.pPin)*100);L.push(Math.abs(d)<=4?`Les stats et le marché (Pinnacle) disent la même chose.`:`Les stats donnent ${d>0?sa:sb} ${Math.abs(d)} points de plus que Pinnacle. Attention : quand ils divergent, le marché a raison le plus souvent.`)}

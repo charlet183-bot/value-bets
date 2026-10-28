@@ -29,3 +29,6 @@ Test 2024-26 (`season_eval.py`, `*_saison.py`) : erreur service 48,1 (carrière 
 
 ## Force des adversaires (28/10/2026)
 `oppadj_eval.py` : stats de la saison corrigées de 0,025 × log(classement adverse / 100). Circuit principal (test 2024-26) : 48,3 → 48,1. Effet plus fort attendu pour les joueurs qui jouent des Challengers (non mesurable, pas de données Challenger).
+
+## Retour selon la puissance du serveur (28/10/2026)
+`return_power.py` : 124 000 services, puissance = taux d'aces du serveur. Effet personnel du retourneur face aux gros serveurs : corrélation passé → futur de 0,01 (bruit). Erreur test 2024-26 : 51,00 (base) → 50,88 (pente commune) → 50,88 (profil sur 21 matchs, poids 0) / 50,87 (toute la carrière). Non intégré au calcul ; affiché à titre indicatif.
