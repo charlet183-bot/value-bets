@@ -123,7 +123,7 @@ details summary{cursor:pointer;font-weight:600}
 .odd.none{cursor:default;color:var(--muted)}
 .oddrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .oddrow .odd{width:100%}
-.slipbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(58px + env(safe-area-inset-bottom,0px));z-index:15;width:min(528px,calc(100% - 24px));
+.slipbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:15;width:min(528px,calc(100% - 24px));
   display:flex;align-items:center;gap:10px;padding:12px 14px;border:0;border-radius:12px;background:var(--fg);color:var(--bg);font:600 15px/1 var(--f-body);
   box-shadow:0 6px 20px rgba(0,0,0,.25);animation:slipin .22s ease-out}
 .slipbar .sb-n{background:var(--clay);color:#fff;border-radius:99px;min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
@@ -217,10 +217,35 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 <div class="wrap">
   <header>
     <h1>Value Bets <span>Tennis</span></h1>
-    <p class="sub">Cotes françaises comparées à la cote « juste » de Pinnacle, marge retirée.</p>
+    <p class="sub">Tous les matchs, le pronostic et la value en un seul écran.</p>
+    <div class="row" id="topbar"><button id="go-home" class="small" type="button" hidden>← Matchs</button><span class="grow"></span><button id="go-bets" class="small" type="button">Mes paris</button><button id="go-comp" class="small" type="button">Calculateur jeux</button></div>
   </header>
 
-  <section id="view-scan" class="wrap" style="padding:0">
+  <section id="view-all" class="wrap" style="padding:0">
+    <div class="panel">
+      <div class="row"><button id="all-run" class="primary grow">Chercher les matchs</button><button id="all-demo" class="small">Exemple</button></div>
+      <div id="status-all" class="status">Ajoute ta clé dans ⚙ Réglages, puis cherche les matchs.</div>
+      <details id="all-settings" class="grp"><summary>⚙ Réglages</summary><div id="settings-slot" style="display:grid;gap:10px;padding-top:6px"></div></details>
+      <details id="all-quick" class="grp"><summary>🔎 Analyser deux joueurs</summary>
+        <div class="duo" style="padding-top:6px"><div class="field"><label class="label" for="q-a">Joueur A</label><input id="q-a" type="text" placeholder="Ex. Taylor Fritz"></div><div class="field"><label class="label" for="q-b">Joueur B</label><input id="q-b" type="text" placeholder="Ex. Jannik Sinner"></div></div>
+        <div class="row"><select id="q-bo5"><option value="0">2 sets gagnants</option><option value="1">3 sets gagnants</option></select><button id="q-go" class="primary grow">Analyser</button></div>
+      </details>
+      <p class="note" style="margin:0">Une recherche coûte 3 crédits par tournoi et reste enregistrée : tu peux fermer l'appli sans repayer.</p>
+    </div>
+    <div class="seg tourfilter" role="group" aria-label="Circuit"></div>
+    <div class="row" id="all-sortrow"><label class="label" for="all-sort">Trier par</label>
+      <select id="all-sort"><option value="value">Value d'abord</option><option value="conf">Pronostic le plus sûr</option><option value="time">Heure du match</option><option value="s1">1er set à 10 jeux ou plus</option><option value="total">Total de jeux</option><option value="speed">Écart de vitesse de service</option></select></div>
+    <div id="results-all" class="wrap" style="padding:0"></div>
+    <details class="panel">
+      <summary>Comment ça marche</summary>
+      <p class="note"><b>Value</b> : la cote Pinnacle, marge retirée, donne le prix juste. Si ton bookmaker paie plus que ce prix (avantage = cote × probabilité − 1), c'est un value bet. C'est le seul critère qui a gagné de l'argent sur 15 ans d'historique.</p>
+      <p class="note"><b>Pronostic</b> : 65 % Pinnacle + 35 % stats. Les stats (Elo, service et retour de la saison corrigés selon les adversaires, forme, fatigue, face-à-face…) sont pondérées par ce qu'elles ont réellement prédit sur 44 000 matchs.</p>
+      <p class="note"><b>Jeux et 1er set</b> : match simulé point par point avec le service de chacun face au retour de l'autre, puis corrigé sur 43 000 matchs réels.</p>
+      <p class="note">Touche un match pour la fiche complète : pronostic, analyse, tous les calculs expliqués, toutes les stats et les adversaires. Même un favori à 75 % perd un match sur quatre : fixe un budget.</p>
+    </details>
+  </section>
+
+  <section id="view-scan" class="wrap" style="padding:0" hidden>
     <div class="panel">
       <div class="row">
         <input id="apikey" class="grow" type="password" placeholder="Clé The Odds API" autocomplete="off">
@@ -345,7 +370,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
   </div>
 </div>
 
-<nav class="tabs" role="tablist">
+<nav class="tabs" role="tablist" hidden>
   <button id="tab-scan" role="tab" aria-selected="true">Value</button>
   <button id="tab-win" role="tab" aria-selected="false">Gagnant</button>
   <button id="tab-jeux" role="tab" aria-selected="false">Jeux</button>
@@ -444,7 +469,7 @@ const slim=evs=>evs.map(e=>({id:e.id,sport_key:e.sport_key,sport_title:e.sport_t
 function saveRun(k,d){RUNS[k]=d;try{localStorage.setItem("vbt_run_"+k,JSON.stringify(d))}catch(e){
   // stockage plein : on garde la recherche (cotes) et les stats essentielles, sans le détail match par match
   try{const lite={...d,stats:Object.fromEntries(Object.entries(d.stats||{}).map(([n,P])=>[n,P&&{...P,recentMatches:undefined,opponents:undefined,set1Recent:undefined,career:P.career&&{...P.career,years:undefined}}]))};localStorage.setItem("vbt_run_"+k,JSON.stringify(lite))}catch(e2){}}}
-function loadRuns(){for(const k of ["scan","jeuxvb","rank","win"]){try{const v=localStorage.getItem("vbt_run_"+k);if(v)RUNS[k]=JSON.parse(v)}catch(e){}}}
+function loadRuns(){for(const k of ["all","scan","jeuxvb","rank","win"]){try{const v=localStorage.getItem("vbt_run_"+k);if(v)RUNS[k]=JSON.parse(v)}catch(e){}}}
 const future=evs=>evs.filter(e=>new Date(e.commence_time).getTime()>Date.now());
 function ago(t){const m=Math.round((Date.now()-t)/60000);if(m<1)return"à l'instant";if(m<60)return`il y a ${m} min`;if(m<1440)return`il y a ${Math.floor(m/60)} h ${String(m%60).padStart(2,"0")}`;const d=new Date(t);return"le "+d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})+" à "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}
 const savedNote=d=>`Recherche ${ago(d.at)}, gardée en mémoire (0 crédit). Relance seulement pour actualiser les cotes.`;
@@ -1318,7 +1343,7 @@ function breakdown(m){
     <div class="calcrows">${items.map(([g,d])=>`<span>${esc(g)}</span><b class="num">+${Math.abs(d)} pt${Math.abs(d)>1?"s":""}</b><span class="who3">${d>0?surn(m.a):surn(m.b)}</span>`).join("")}</div>
     <p class="note" style="margin:6px 0 0">Points de % gagnés grâce à chaque groupe de stats, par rapport à un match à 50/50. Poids appris sur 44 000 matchs ATP.${zero.length?` Sans effet mesurable (poids 0) : ${zero.map(esc).join(", ")}.`:""}</p></details>`;
 }
-const winSel=(m,sd)=>selBtn({sid:m.id+"|"+sd.player+"|"+sd.book,mid:m.id,label:sd.player,short:surname(sd.player)+" · "+sd.book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:sd.book,price:sd.price,p:sd.p,link:sd.link,copy:surname(sd.player),cat:"gagnant",value:sd.edge>=+$("minedge").value});
+const winSel=(m,sd)=>selBtn({sid:m.id+"|"+sd.player+"|"+sd.book,mid:m.id,label:sd.player,short:surname(sd.player)+" · "+sd.book,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:sd.book,price:sd.price,p:sd.p,link:sd.link,copy:surname(sd.player),cat:"gagnant",value:(m.pPin!=null?sd.price*(sd.player===m.a?m.pPin:1-m.pPin)-1:sd.edge)>=+$("minedge").value}); // value = au-dessus du prix juste Pinnacle
 function renderWin(list){
   const r=$("results-win");const n0=list.length;list=list.filter(m=>tourOK(m.tour));if(n0&&!list.length){r.innerHTML=`<div class="panel"><b>Aucun match ${tourFilter==="wta"?"féminin":"masculin"} dans cette recherche.</b><span class="note">Choisis « Tous » pour revoir les ${n0} match(s).</span></div>`;return}
   if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match avec des cotes Pinnacle pour l\'instant.</b><span class="note">Réessaie un peu plus tard.</span></div>';return}
@@ -1379,7 +1404,7 @@ function showWin(fresh){
   $("status-win").textContent=`${res.length} matchs à venir · stats complètes pour ${res.filter(m=>m.st).length} · ${res.filter(m=>m.val).length} value bet(s) chez tes bookmakers · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
   return true;
 }
-function pickWinSurf(k){winSurf=k;store.set("vbt_wsurf",k);surfButtons("win-surf",winSurf,true,pickWinSurf);showWin()}
+function pickWinSurf(k){winSurf=k;store.set("vbt_wsurf",k);surfButtons("win-surf",winSurf,true,pickWinSurf);showWin();showAll()}
 surfButtons("win-surf",winSurf,true,pickWinSurf);
 $("win-run").onclick=runWinners;
 $("win-sort").onchange=()=>{if(lastWin.length)renderWin(sortWin(lastWin))};
@@ -1682,7 +1707,106 @@ document.addEventListener("click",e=>{
 });
 const anAttr=o=>` data-an="${esc(JSON.stringify(o))}"`;
 const anBtn=o=>`<button class="small abtn" type="button"${anAttr(o)}>📊 Analyse du match</button>`;
-function setTab(t){for(const k of ["scan","win","jeux","comp","bets"]){$("view-"+k).hidden=t!==k;$("tab-"+k).setAttribute("aria-selected",t===k)}}
+// ===================== Écran unique « Matchs » : une recherche, tout sur chaque match =====================
+let lastAll=[];
+async function scanAll(){
+  const key=$("apikey").value.trim(),st=(t,e)=>{$("status-all").textContent=t;$("status-all").className="status"+(e?" err":"")};
+  if(!key){st("Ajoute d'abord ta clé The Odds API dans ⚙ Réglages (gratuite sur the-odds-api.com).",true);$("all-settings").open=true;return}
+  store.set("vbt_key",key);
+  $("all-run").disabled=true;st("Recherche des tournois en cours…");
+  try{
+    const sr=await fetch(`${API}/sports?apiKey=${encodeURIComponent(key)}`);
+    if(sr.status===401)throw new Error("Clé refusée : vérifie-la sur the-odds-api.com.");
+    if(!sr.ok)throw new Error("L'API ne répond pas ("+sr.status+"). Réessaie dans un moment.");
+    const sports=(await sr.json()).filter(s=>s.group==="Tennis"&&s.active&&!s.has_outrights);
+    if(!sports.length){st("Aucun tournoi de tennis actif en ce moment.");renderAll([]);return}
+    const bk=[SHARP,...Object.keys(BOOKS)].join(",");let all=[],left="?";
+    for(const s of sports){
+      st("Lecture des cotes : "+s.title+"…");
+      const r=await fetch(`${API}/sports/${s.key}/odds?apiKey=${encodeURIComponent(key)}&bookmakers=${bk}&markets=h2h,totals,spreads&oddsFormat=decimal&includeLinks=true`);
+      left=r.headers.get("x-requests-remaining")||left;
+      if(r.status===429)throw new Error("Quota de crédits épuisé pour ce mois.");
+      if(r.ok)all=all.concat(await r.json());
+    }
+    all=future(all);
+    const names=[...new Set(all.flatMap(e=>[e.home_team,e.away_team]))];
+    const pairs=all.map(e=>[e.home_team,e.away_team]);
+    st(`Récupération des stats de ${names.length} joueurs (saison, adversaires, Elo, forme, face-à-face)… jusqu'à une minute.`);
+    for(const n of names)if(isOld(statCache[n]))delete statCache[n];
+    for(const p of pairs)delete h2hCache[pairKey(p)];
+    await fetchStats(names,pairs);
+    saveRun("all",{at:Date.now(),events:slim(all),left,sports:sports.length,stats:statsFor(all),h2h:Object.fromEntries(pairs.map(p=>[pairKey(p),h2hCache[pairKey(p)]||null]))});
+    showAll(true);
+  }catch(e){st(e.message&&e.message.length<140?e.message:"Impossible de joindre l'API. Vérifie ta connexion.",true)}
+  finally{$("all-run").disabled=false}
+}
+// Tout ce qu'on sait d'un match, pour la carte de la liste
+function buildMatch(ev){
+  const minE=+$("minedge").value,w=analyseWinners([ev],minE)[0];if(!w)return null;
+  const m={...w,ev};
+  // value sur le vainqueur : cote de tes bookmakers contre le prix juste Pinnacle
+  m.pv=m.sides.map((sd,i)=>sd?{...sd,pe:sd.price*(i?1-m.pPin:m.pPin)-1}:null);
+  const g=analyseGames([ev],minE)[0];m.gameHits=g?g.hits:[];
+  const vals=[...m.pv.filter(x=>x&&x.pe>=minE).map(x=>x.pe),...m.gameHits.map(x=>x.edge)];m.bestEdge=vals.length?Math.max(...vals):null;
+  // jeux, 1er set (si stats)
+  if(m.st&&m.A&&m.B){const wta=/WTA/i.test(m.tour||""),avgS=wta?.56:.64,cl=x=>Math.min(.85,Math.max(.35,x));
+    const pa=cl(m.st.sA-m.st.rB+(1-avgS)),pb=cl(m.st.sB-m.st.rA+(1-avgS)),gm=gamesModel(pa,pb,m.bo5),d1=set1Cal(gm.first,m.bo5,m.st.surf);
+    m.s1=overOf(d1,9.5);m.tb1=d1[13]||0;m.totL=fairLine(gm.total,"total",m.bo5,m.st.surf,12,50).L;m.ha=holdP(pa);m.hb=holdP(pb)}
+  return m;
+}
+function sortAll(list){
+  const k=$("all-sort").value,f={value:m=>(m.bestEdge!=null?10+m.bestEdge:0)+m.pW/10,conf:m=>m.pW,time:m=>-new Date(m.start).getTime(),s1:m=>m.s1??-1,total:m=>m.totL??-1,speed:m=>speedGap(m.a,m.b)}[k];
+  return list.slice().sort((x,y)=>f(y)-f(x));
+}
+function renderAll(list,demo){
+  const r=$("results-all");const n0=list.length;list=list.filter(m=>tourOK(m.tour));
+  if(n0&&!list.length){r.innerHTML=`<div class="panel"><b>Aucun match ${tourFilter==="wta"?"féminin":"masculin"} dans cette recherche.</b><span class="note">Choisis « Tous » pour revoir les ${n0} match(s).</span></div>`;return}
+  if(!list.length){r.innerHTML='<div class="panel"><b>Aucun match pour l\'instant.</b><span class="note">Lance une recherche, ou touche « Exemple » pour voir à quoi ça ressemble.</span></div>';return}
+  const minE=+$("minedge").value;
+  r.innerHTML=list.map(m=>{
+    const d=new Date(m.start),when=d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})+" · "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+    const wn=m.w?m.b:m.a,an={a:m.a,b:m.b,tour:m.tour,start:m.start,id:m.id,bo5:m.bo5};
+    const tag=!m.st?'<span class="tag mid">Pinnacle seul</span>':m.pW<.56?'<span class="tag mid">Match ouvert</span>':m.agree&&m.pW>=.65?'<span class="tag ok">Accord fort</span>':m.agree?'<span class="tag mid">D\'accord</span>':'<span class="tag no">Désaccord</span>';
+    const vh=m.pv.filter(x=>x&&x.pe>=minE).sort((x,y)=>y.pe-x.pe);
+    const valHtml=[...vh.map(x=>`<div class="vb"><div class="who"><b>VALUE · ${esc(x.player)}</b><small>${esc(x.book)} · cote <span class="num">${odd(x.price)}</span> · prix juste Pinnacle ${odd(1/(x.player===m.a?m.pPin:1-m.pPin))}</small></div><span class="edge">+${pct(x.pe)}</span>${demo?"":`<div class="go">${goHtml(x.book,x.link,surname(x.player))}</div>`}</div>`),
+      ...m.gameHits.slice(0,2).map(h=>`<div class="vb"><div class="who"><b>VALUE · ${esc(h.player)}</b><small>${esc(h.book)} · cote <span class="num">${odd(h.price)}</span> · prix juste ${odd(1/h.p)}</small></div><span class="edge">+${pct(h.edge)}</span>${selBtn({sid:m.id+"|"+h.player+"|"+h.book,mid:m.id,label:h.player,match:m.a+" – "+m.b,tour:m.tour,start:m.start,book:h.book,price:h.price,p:h.p,link:h.link,copy:surname(m.a),cat:"jeux",value:true})}${demo?"":`<div class="go">${goHtml(h.book,h.link,surname(m.a))}</div>`}</div>`)].join("");
+    const facts=[m.s1!=null?`1er set 10+ <b>${pct(m.s1)}</b>`:"",m.totL!=null?`Total ≈ <b>${dec(m.totL)}</b> jeux`:"",m.ha!=null?`Service gardé <b>${surn(m.a)} ${pct(m.ha)}</b> · <b>${surn(m.b)} ${pct(m.hb)}</b>`:""].filter(Boolean);
+    return `<div class="match${vh.length||m.gameHits.length?" hit":""}"><div class="mhead"><span>${esc(m.tour)}${m.bo5?" · 5 sets":""}</span><span>${when}${demo?' <span class="chip demo">Exemple</span>':""}</span></div>
+      <div class="players"${demo?"":anAttr(an)} style="cursor:pointer">${esc(m.a)} – ${esc(m.b)}${demo?"":' <small class="note">›</small>'}</div>
+      <div class="pick"><div><div class="label">Pronostic</div><b>${esc(wn)}</b></div><div style="text-align:right">${tag}<div class="big">${pct(m.pW)}</div></div></div>
+      ${m.sides.some(Boolean)?`<div class="oddrow">${m.sides.map(sd=>sd?winSel(m,sd):`<span class="odd none">–</span>`).join("")}</div>`:'<span class="note">Pas encore de cote chez tes bookmakers.</span>'}
+      ${valHtml}
+      ${speedGauge(m.a,m.b,m.A,m.B)}
+      ${facts.length?`<div class="meta" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted)">${facts.map(x=>`<span>${x}</span>`).join("")}</div>`:""}
+      ${demo?"":`<div class="acts">${anBtn(an)}</div>`}</div>`}).join("");
+}
+function showAll(fresh){
+  // dernière recherche : celle de l'écran unique, sinon une ancienne recherche déjà payée (Gagnant, Jeux, Value)
+  const d=RUNS.all||[RUNS.win,RUNS.rank,RUNS.scan].filter(Boolean).sort((x,y)=>y.at-x.at)[0];if(!d)return false;
+  Object.assign(statCache,d.stats||{});Object.assign(h2hCache,d.h2h||{});
+  if(d===RUNS.all)for(const k of ["scan","win","rank","jeuxvb"])if(!RUNS[k]||RUNS[k].at<d.at)RUNS[k]=d; // la fiche match retrouve les cotes
+  const evs=future(d.events);lastAll=evs.map(buildMatch).filter(Boolean);
+  renderAll(sortAll(lastAll));
+  const v=lastAll.filter(m=>m.bestEdge!=null).length;
+  $("status-all").className="status";
+  $("status-all").textContent=`${lastAll.length} matchs à venir · ${v} avec value chez tes bookmakers · stats pour ${lastAll.filter(m=>m.st).length} · crédits restants : ${d.left}`+(fresh?"":" · "+savedNote(d));
+  return true;
+}
+function showAllDemo(){lastAll=demoData().map(buildMatch).filter(Boolean);renderAll(sortAll(lastAll),true);$("status-all").textContent="Exemple fictif (joueurs inventés). Ajoute ta clé dans ⚙ Réglages pour les vrais matchs."}
+$("all-run").onclick=scanAll;$("all-demo").onclick=showAllDemo;
+$("all-sort").onchange=()=>{if(lastAll.length)renderAll(sortAll(lastAll),!RUNS.all)};
+$("q-go").onclick=()=>openMatch({a:$("q-a").value.trim(),b:$("q-b").value.trim(),tour:"Analyse",bo5:$("q-bo5").value==="1"});
+// Réglages : on déplace les réglages existants (mêmes champs, mêmes réglages enregistrés)
+(()=>{const slot=$("settings-slot");
+  const keyRow=$("apikey").closest(".row");slot.appendChild(keyRow);
+  slot.appendChild($("minedge").closest(".row"));
+  slot.appendChild($("mybooks").closest(".field"));
+  const sf=$("win-surf").closest(".field");slot.appendChild(sf);
+})();
+// Navigation : un seul écran, plus « Mes paris » et le calculateur de jeux
+function goView(v){for(const k of ["all","scan","win","jeux","comp","bets"])$("view-"+k).hidden=k!==v;$("go-home").hidden=v==="all";window.scrollTo(0,0)}
+$("go-home").onclick=()=>goView("all");$("go-bets").onclick=()=>{goView("bets");renderBets()};$("go-comp").onclick=()=>{goView("comp");if(!$("c-out").innerHTML)runComp()};
+function setTab(t){goView(t)}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-win").onclick=()=>setTab("win");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
 // Circuit : tous, hommes (ATP) ou femmes (WTA), mémorisé et commun aux onglets Value, Gagnant et Jeux
 let tourFilter=store.get("vbt_tour","all");
@@ -1696,6 +1820,7 @@ function renderTourFilters(){
 // Écart de vitesse moyenne de service entre les deux joueurs (km/h), -1 si inconnu
 function speedGap(a,b){const x=speedInfo(a,statCache[a]),y=speedInfo(b,statCache[b]);return x&&y?Math.abs(x.kmh-y.kmh):-1}
 function refreshAll(){
+  if(!showAll())showAllDemo();
   if(!showScan())showDemo();
   showWin();
   const last=store.get("vbt_jeux_last",null);if(last==="rank")showRank();else if(last==="jeuxvb")showJeuxVb();
