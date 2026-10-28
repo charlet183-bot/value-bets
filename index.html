@@ -623,7 +623,7 @@ function runComp(){
     const sv=(P,n)=>{const x=speedInfo(n,P);return x?`<b>${esc(n.split(" ").pop())} ${Math.round(x.kmh)} km/h</b>`:null},spd=[sv(A,na),sv(B,nb)].filter(Boolean);
     if(spd.length)aces+=`<div class="meta"><span>Vitesse moyenne de service ${spd.join(" · ")}</span></div>`;
     if(xa!=null&&xb!=null)aces+=`<div class="meta"><span>Aces attendus <b>${esc(na.split(" ").pop())} ${xa.toFixed(1).replace(".",",")}</b> · <b>${esc(nb.split(" ").pop())} ${xb.toFixed(1).replace(".",",")}</b></span></div>`;
-    cmp=cmpGroups([["Comparatif 1er set",set1Rows(A,B,na,nb,surf)],["Saison en cours",careerRows(A,B,surf)]],na,nb,A,B,true);
+    cmp=cmpGroups([["Comparatif 1er set",set1Rows(A,B,na,nb,surf)],["Saison en cours",careerRows(A,B,surf)]],na,nb,A,B,true)+oppHtml(A,B,na,nb);
   }
   out.innerHTML=`<div class="label">${esc(na)} (${pct(ha)}) contre ${esc(nb)} (${pct(hb)})</div>
    <div class="prob"><div><b>${esc(label)}</b><div class="note">${mk==="set1"?"Moyenne attendue":"Moyenne brute du modèle"} : ${mean.toFixed(1).replace(".",",")} jeux · cote juste ${odd(1/p)}</div></div><span class="big">${pct(p)}</span></div>
@@ -636,7 +636,7 @@ $("c-run").onclick=runComp;$("c-bo5").onchange=runComp;
 const SURF={Hard:"dur",Clay:"terre battue",Grass:"gazon"};
 const MIN_SURF=3;
 // Réponse d'une ancienne version du relais (sans stats par surface sur 60 matchs) : à redemander
-const isOld=P=>!!P&&(P.career===undefined||(P.career&&P.career.season===undefined)); // avant la v8 du relais (saison en cours) // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
+const isOld=P=>!!P&&P.recentMatches===undefined; // avant la v9 du relais (matchs détaillés, adversaires) // en dessous, l'échantillon est trop petit : on garde les stats toutes surfaces
 let compSurf=store.get("vbt_csurf","all");
 function surfButtons(box,cur,withAuto,onPick){
   const opts=[[withAuto?"auto":"all",withAuto?"Auto":"Toutes"],["Hard","Dur"],["Clay","Terre battue"],["Grass","Gazon"]];
@@ -1125,6 +1125,64 @@ function yearsHtml(A,B,na,nb){
   const cell=(P,y)=>{const x=((P.career||{}).years||[]).find(r=>r.y===y&&r.lvl==="tour");return x?`${x.m} m. · ${x.hold!=null?pct(x.hold):"–"}<br><small>${x.gps!=null?dec1(x.gps)+" jeux/set":""}</small>`:"–"};
   return `<details class="grp"><summary>Saison par saison (circuit principal)</summary><table class="cmp"><thead><tr><td>${surn(na)}</td><td></td><td>${surn(nb)}</td></tr></thead><tbody>${ys.map(y=>`<tr><td>${cell(A,y)}</td><th>${y}</th><td>${cell(B,y)}</td></tr>`).join("")}</tbody></table><p class="note" style="margin:4px 0 0">Matchs · jeux de service gagnés · jeux par set.</p></details>`;
 }
+
+// ===== Comparatifs « adversaires » : à qui chaque joueur a été opposé cette saison, et comment
+const curYear=()=>String(new Date().getFullYear());
+const seasonM=P=>((P&&P.recentMatches)||[]).filter(m=>String(m.d||"").includes(curYear())&&m.w!==null);
+const wlOf=ms=>({w:ms.filter(m=>m.w).length,n:ms.length});
+const rkTxt=r=>r==null?"nc":r>=999?"nc":"#"+r;
+const spwAvg=ms=>{const x=ms.filter(m=>m.spw!=null);return x.length?x.reduce((t,m)=>t+m.spw,0)/x.length:null};
+function bigServer(n,wta){const v=tableSpeed(n);return v!=null&&v>=(wta?170:195)}
+function oppRows(A,B,na,nb){
+  const ma=seasonM(A),mb=seasonM(B),wta=!!(A.elo&&/wta/i.test(A.elo.tour));
+  const med=ms=>{const r=ms.map(m=>m.r??500).sort((x,y)=>x-y);return r.length?r[Math.floor(r.length/2)]:null};
+  const fr=o=>o.n?`${o.w}/${o.n} <small>${pct(o.w/o.n)}</small>`:"–";
+  const ra=o=>o.n?o.w/o.n:null;
+  const tier=(lo,hi)=>[ma,mb].map(ms=>wlOf(ms.filter(m=>(m.r??500)>=lo&&(m.r??500)<=hi)));
+  const rows=[
+    ["Matchs détaillés cette saison",ma.length,mb.length,v=>v||"–",0],
+    ["Rang moyen des adversaires (saison)",(A.career&&A.career.season||{}).oppRankAvg,(B.career&&B.career.season||{}).oppRankAvg,v=>v?"#"+v:"–",-1],
+    ["Rang médian des adversaires (derniers matchs)",med(ma),med(mb),v=>v?"#"+v:"–",-1],
+    ["Correction appliquée au service",(A.career&&A.career.season||{}).oppAdj,(B.career&&B.career.season||{}).oppAdj,v=>v==null?"–":`${v<=0?"+":"−"}${Math.abs(v*100).toFixed(1).replace(".",",")} pt<br><small>${v<=0?"adversaires forts":"adversaires faibles"}</small>`,0],
+  ];
+  for(const [lo,hi,lab] of [[1,10,"Contre le top 10 (saison)"],[11,50,"Contre les 11e à 50e"],[51,100,"Contre les 51e à 100e"],[101,99999,"Contre les joueurs après le 100e"]]){const [x,y]=tier(lo,hi);rows.push([lab,ra(x),ra(y),(v,P)=>fr(P===A?x:y),1])}
+  // contre des joueurs du niveau de l'adversaire du jour
+  const band=(ms,r)=>r?ms.filter(m=>{const k=m.r??500;return k>=r/1.6&&k<=r*1.6}):[];
+  const sa=band(ma,B.rank),sb=band(mb,A.rank),xa=wlOf(sa),xb=wlOf(sb);
+  rows.push([`Contre des joueurs du niveau de l'adversaire`,ra(xa),ra(xb),(v,P)=>{const o=P===A?xa:xb,ss=spwAvg(P===A?sa:sb),opp=P===A?B:A;return o.n?`${fr(o)}<br><small>autour du #${opp.rank} · service ${ss!=null?pct(ss):"–"}</small>`:"–"},1]);
+  const bt=(ms,r)=>r?wlOf(ms.filter(m=>(m.r??500)<=r)):{w:0,n:0},ya=bt(ma,B.rank),yb=bt(mb,A.rank);
+  rows.push(["Contre mieux classés que l'adversaire",ra(ya),ra(yb),(v,P)=>fr(P===A?ya:yb),1]);
+  const ga=ma.filter(m=>bigServer(m.o,wta)),gb=mb.filter(m=>bigServer(m.o,wta)),za=wlOf(ga),zb=wlOf(gb);
+  rows.push([`Contre les gros serveurs (≥ ${wta?170:195} km/h)`,ra(za),ra(zb),(v,P)=>{const o=P===A?za:zb,r=(P===A?ga:gb).filter(m=>m.rpw!=null);return o.n?`${fr(o)}${r.length?`<br><small>retour ${pct(r.reduce((t,m)=>t+m.rpw,0)/r.length)}</small>`:""}`:"–"},1]);
+  rows.push(["Service gagné contre le top 50",spwAvg(ma.filter(m=>(m.r??500)<=50)),spwAvg(mb.filter(m=>(m.r??500)<=50)),v=>v==null?"–":pct(v),1]);
+  rows.push(["Service gagné contre les autres",spwAvg(ma.filter(m=>(m.r??500)>50)),spwAvg(mb.filter(m=>(m.r??500)>50)),v=>v==null?"–":pct(v),1]);
+  const lv=(ms,k)=>wlOf(ms.filter(m=>m.lv===k));
+  for(const [k,lab] of [["top","Grand Chelem / Masters"],["tour","Autres tournois du circuit"],["low","Challengers / ITF"]]){const x=lv(ma,k),y=lv(mb,k);if(x.n||y.n)rows.push([lab+" (saison)",ra(x),ra(y),(v,P)=>fr(P===A?x:y),1])}
+  return rows;
+}
+// Adversaires en commun : cette saison (match par match) et sur la carrière (bilans)
+function commonHtml(A,B,na,nb){
+  const key=n=>normName(n);
+  const ma=seasonM(A),mb=seasonM(B),mapB={};mb.forEach(m=>{if(m.o)(mapB[key(m.o)]=mapB[key(m.o)]||[]).push(m)});
+  const seen={},rows=[];
+  for(const m of ma){if(!m.o)continue;const k=key(m.o);if(!mapB[k]||seen[k])continue;seen[k]=1;
+    const la=ma.filter(x=>x.o&&key(x.o)===k),lb=mapB[k];
+    const cell=l=>l.map(x=>`<span style="color:${x.w?"var(--good)":"var(--bad)"}">${x.w?"V":"D"}</span> ${esc(x.sc||"")}<br><small>service ${x.spw!=null?pct(x.spw):"–"}${x.g1?`<br>1er set : ${x.g1} jeux`:""}</small>`).join("<br>");
+    rows.push(`<tr><td>${cell(la)}</td><th>${esc(m.o)}<br><small>${rkTxt(m.r)}</small></th><td>${cell(lb)}</td></tr>`)}
+  const oa={},ob={};((A.opponents)||[]).forEach(o=>oa[key(o.n)]=o);((B.opponents)||[]).forEach(o=>ob[key(o.n)]=o);
+  const car=Object.keys(oa).filter(k=>ob[k]).map(k=>`<tr><td>${oa[k].w}–${oa[k].l}<br><small>service ${oa[k].s!=null?pct(oa[k].s):"–"}</small></td><th>${esc(oa[k].n)}<br><small>carrière</small></th><td>${ob[k].w}–${ob[k].l}<br><small>service ${ob[k].s!=null?pct(ob[k].s):"–"}</small></td></tr>`);
+  const head=`<thead><tr><td>${surn(na)}</td><td></td><td>${surn(nb)}</td></tr></thead>`;
+  const body=rows.length||car.length?`<table class="cmp">${head}<tbody>${rows.join("")}${car.join("")}</tbody></table>`:`<p class="note" style="margin:4px 0">Aucun adversaire commun dans les matchs connus.</p>`;
+  return `<details class="grp"><summary>Adversaires en commun (${rows.length+car.length})</summary>${body}<p class="note" style="margin:4px 0 0">Cette saison : chaque match avec score, % de points gagnés au service et jeux du 1er set. Carrière : bilan contre leurs adversaires les plus fréquents.</p></details>`;
+}
+// Liste des matchs de la saison de chaque joueur
+function matchListHtml(P,name){
+  const ms=seasonM(P);if(!ms.length)return"";
+  return `<details class="grp"><summary>Adversaires de ${surn(name)} cette saison (${ms.length})</summary><table class="cmp"><tbody>${ms.map(m=>`<tr><td style="width:22%"><span style="color:${m.w?"var(--good)":"var(--bad)"}">${m.w?"V":"D"}</span><br><small>${esc(String(m.d||"").slice(0,6))}</small></td><th style="text-align:left;width:50%">${esc(m.o||"?")} <small>${rkTxt(m.r)}</small><br><small>${esc(m.t||"")} · ${SURF[m.s]||esc(m.s||"")}</small></th><td style="width:28%">${esc(m.sc||"")}<br><small>service ${m.spw!=null?pct(m.spw):"–"}</small></td></tr>`).join("")}</tbody></table></details>`;
+}
+function oppHtml(A,B,na,nb){
+  return cmpGroups([["Adversaires de la saison",oppRows(A,B,na,nb)]],na,nb,A,B,true)+commonHtml(A,B,na,nb)+matchListHtml(A,na)+matchListHtml(B,nb);
+}
 function cmpTable(m){
   const A=m.A,B=m.B;if(!A||!B)return"";
   const qa=A.quality,qb=B.quality,st=m.st,sf=st&&st.surf,fa=A.fatigue||{},fb=B.fatigue||{},ca=A.clutch,cb=B.clutch,sa=A.serve||{},sb=B.serve||{};
@@ -1196,8 +1254,8 @@ function cmpTable(m){
   const h=m.h2h;
   const h2hHtml=h&&h.n?`<p class="note" style="margin:4px 0">${surn(m.a)} <b class="num">${h.a}–${h.b}</b> ${surn(m.b)}${h.career?` <small>(toute la carrière${h.first?", depuis "+esc(h.first):""})</small>`:""}${h.tbN?`<br>Tie-breaks entre eux : ${surn(m.a)} ${h.tbA}–${h.tbN-h.tbA}`:""}${Object.keys(h.surf||{}).length?`<br>Récemment par surface : `+Object.entries(h.surf).map(([k,v])=>`${SURF[k]||esc(k)} ${v.a}–${v.b}`).join(" · "):""}${h.last?`<br>Dernier match récent : victoire de ${h.last.aWon?surn(m.a):surn(m.b)} (${esc(h.last.tourney||"")}, ${esc(h.last.score||"")})`:""}</p>`
     :`<p class="note" style="margin:4px 0">${h?"Aucun match entre eux dans l'historique récent.":"Face-à-face pas encore disponible : relance l'analyse."}</p>`;
-  return `<details class="allstats"><summary>Comparer toutes les stats</summary>${html}<details class="grp"><summary>Face-à-face</summary>${h2hHtml}</details>
-    <p class="note" style="margin:6px 0 0">Vitesse de service : moyenne des derniers matchs mesurés par radar à Wimbledon et à l'US Open (année indiquée), seule source disponible. En orange : le meilleur des deux. Forme sur les 20 derniers matchs ; service et retour du calcul : 50 % saison en cours (tous ses matchs) + 50 % forme récente et surface ; 1ers sets : derniers matchs connus ; surface, niveaux, tie-breaks, gauchers/droitiers sur les 52 dernières semaines ; face-à-face sur toute la carrière. ▸ = surface utilisée. Entre parenthèses : victoires attendues d'après le classement des adversaires. Dates de fatigue : début de tournoi.</p></details>`;
+  return `<details class="allstats"><summary>Comparer toutes les stats</summary>${html}${oppHtml(A,B,m.a,m.b)}<details class="grp"><summary>Face-à-face</summary>${h2hHtml}</details>
+    <p class="note" style="margin:6px 0 0">Vitesse de service : moyenne des derniers matchs mesurés par radar à Wimbledon et à l'US Open (année indiquée), seule source disponible. En orange : le meilleur des deux. Forme sur les 20 derniers matchs ; service et retour du calcul : 50 % saison en cours (tous ses matchs, corrigés selon la force des adversaires) + 50 % forme récente et surface ; 1ers sets : derniers matchs connus ; surface, niveaux, tie-breaks, gauchers/droitiers sur les 52 dernières semaines ; face-à-face sur toute la carrière. ▸ = surface utilisée. Entre parenthèses : victoires attendues d'après le classement des adversaires. Dates de fatigue : début de tournoi.</p></details>`;
 }
 // Signaux sur la qualité des résultats récents
 function alerts(m){

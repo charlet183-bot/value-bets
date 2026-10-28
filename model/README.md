@@ -26,3 +26,6 @@ Les coefficients sont recopiés dans `index.html` (constantes `GCAL` et `ACECAL`
 Les calculs utilisent la saison en cours (circuit + Challengers, 600 points d'a priori) mélangée à 50 % avec la forme récente et la surface, au lieu de toute la carrière.
 Test 2024-26 (`season_eval.py`, `*_saison.py`) : erreur service 48,1 (carrière 47,4 ; ancienne appli 50,4). Faible en janvier-mars (peu de matchs).
 1er set : distribution 1,740 (ancienne 1,799) ; jeux par joueur 62,6 % ; aces 3,14 ; vainqueur 64,9 %.
+
+## Force des adversaires (28/10/2026)
+`oppadj_eval.py` : stats de la saison corrigées de 0,025 × log(classement adverse / 100). Circuit principal (test 2024-26) : 48,3 → 48,1. Effet plus fort attendu pour les joueurs qui jouent des Challengers (non mesurable, pas de données Challenger).

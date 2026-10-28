@@ -20,7 +20,7 @@ for f in sorted(glob.glob(os.path.join(DATA, "[12][0-9][0-9][0-9].csv"))):
 rows.sort(key=lambda r: (r["_d"], r["tourney_id"], ROUND_ORD.get(r["round"], 5), int(fnum(r["match_num"]) or 0)))
 print("matchs :", len(rows), file=sys.stderr)
 
-K = ("m", "sv", "sw", "rv", "rw", "sg", "hd", "rg", "br", "ace", "tbw", "tbn", "gw", "gl", "st", "s1n", "s1g", "s1o")
+K = ("m", "sv", "sw", "rv", "rw", "sg", "hd", "rg", "br", "ace", "tbw", "tbn", "gw", "gl", "st", "s1n", "s1g", "s1o", "lo", "lr", "lm")
 year = defaultdict(lambda: defaultdict(lambda: [0.0] * len(K)))   # joueur -> année -> compteurs
 surfc = defaultdict(lambda: defaultdict(lambda: [0.0] * len(K)))  # joueur -> surface -> compteurs (carrière)
 recent = defaultdict(lambda: deque(maxlen=120))                     # derniers matchs (pour l'actuel)
@@ -76,7 +76,9 @@ def current(pid, surface, d):
         return (s52["n"] * s52[k] + 6 * base) / (s52["n"] + 6)
     s1 = [m["s1"] for m in H[-21:] if m["s1"]]
     ace = sum(m["ace"] for m in last) / max(1, sum(m["sv"] for m in last))
-    return {"spw": bl("spw", spw), "rpw": bl("rpw", rpw), "n": len(last), "ace": ace,
+    cy = [m for m in list(recent[pid])[-21:] if m["d"].year == d.year]
+    ml21 = (sum(math.log(min(1000, max(1, m["ork"])) / 100) for m in cy) / len(cy)) if cy else None
+    return {"spw": bl("spw", spw), "rpw": bl("rpw", rpw), "n": len(last), "ace": ace, "ml21": ml21, "n21": len(cy),
             "s1o_recent": (sum(1 for x in s1 if x >= 10) / len(s1)) if len(s1) >= 3 else None,
             "s1m_recent": (sum(s1) / len(s1)) if len(s1) >= 3 else None}
 
@@ -124,6 +126,9 @@ for r in rows:
             c[I["sg"]], c[I["hd"]] = s["sg"], s["sg"] - (s["bf"] - s["bs"])
             c[I["rg"]], c[I["br"]] = s["og"], s["obf"] - s["obs"]
             c[I["ace"]] = s["ace"]
+            lk = math.log(min(1000, max(1, opp_rank)) / 100)   # force de l'adversaire (log du classement)
+            c[I["lo"]], c[I["lr"]] = s["sv"] * lk, s["rv"] * lk
+        c[I["lm"]] = math.log(min(1000, max(1, opp_rank)) / 100)
         if sets:
             c[I["tbn"]] = len(tbs); c[I["tbw"]] = sum(1 for a, b in tbs if (a > b) == won)
             gwn = sum(a for a, b in sets); gls = sum(b for a, b in sets)

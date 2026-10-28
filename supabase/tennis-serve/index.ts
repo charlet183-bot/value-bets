@@ -3,6 +3,7 @@
 //   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
 // v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
 //      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
+// v9 : saison corrigée selon la force des adversaires ; matchs récents détaillés ; tous les adversaires de la carrière.
 // v8 : stats de la saison en cours pour les calculs (career.season).
 // v7 : toute la carrière (saisons circuit + Challengers, surfaces) ; jeux du 1er set des derniers matchs.
 // v6 : lit aussi les autres tableaux de la page Tennis Abstract : bilans sur 52 semaines (surface, niveau,
@@ -113,6 +114,8 @@ function parse(js: string, surname: string) {
     const rpw = isFinite(dr) && dr > 0 ? Math.min(0.75, Math.max(0.1, dr * (1 - spw))) : null; // DR = retour gagné / service perdu
     const rank = parseInt(rk, 10), oRank = parseInt(vrk, 10);
     const m = score.match(/^(\d+)-(\d+)/);
+    // 1er set terminé seulement (un abandon à 4-1 n'est pas un 1er set de 5 jeux)
+    const s1ok = !!m && ((Math.max(+m[1], +m[2]) === 6 && Math.abs(+m[1] - +m[2]) >= 2) || (Math.max(+m[1], +m[2]) === 7 && Math.min(+m[1], +m[2]) >= 5));
     const bp = (BP || "").match(/^(\d+)\/(\d+)$/);
     const win = result(match, surname);
     out.push({
@@ -120,7 +123,7 @@ function parse(js: string, surname: string) {
       ace: a, df: pctNum(DF), fi, fw, sw, spw, rpw,
       bps: bp ? +bp[1] : null, bpf: bp ? +bp[2] : null, mins: minutes(time || ""),
       win, rank: isFinite(rank) ? rank : null, opp: opponent(match, win),
-      oppRank: isFinite(oRank) ? oRank : (vrk.trim() === "" ? null : 999), set1: m ? +m[1] + +m[2] : null,
+      oppRank: isFinite(oRank) ? oRank : (vrk.trim() === "" ? null : 999), set1: m && s1ok ? +m[1] + +m[2] : null,
     });
     if (out.length >= 150) break;
   }
@@ -173,6 +176,18 @@ function careerH2h(js: string) {
   }
   return out;
 }
+// Tous les adversaires rencontrés (carrière) : nom, bilan, dernière année, % service et retour contre lui
+function opponentsList(js: string) {
+  const t = table(js, "head-to-heads");
+  if (!t) return [];
+  const col = (name: string) => t.head.indexOf(name);
+  const iS = col("SPW"), iR = col("RPW");
+  return t.rows.map((r) => {
+    const name = (r[1] || "").replace(/\[[^\]]*\]/g, "").trim();
+    const v = (i: number) => { const x = num(r[i]); return x === null ? null : x / 100; };
+    return { n: name, w: num(r[2]) || 0, l: num(r[3]) || 0, y: num(r[10]), s: iS >= 0 ? v(iS) : null, r: iR >= 0 ? v(iR) : null };
+  }).filter((x) => x.n).slice(0, 400);
+}
 // Vitesse de service (mph) : moyenne des matchs mesurés les plus récents
 function serveSpeed(js: string) {
   const t = table(js, "serve-speed");
@@ -190,13 +205,20 @@ function serveSpeed(js: string) {
 // Testé sur 43 000 matchs ATP (model/career_eval.py) : saisons pondérées avec une demi-vie de 1 an,
 // 300 points d'a priori, écart de surface de la carrière réduit selon le nombre de matchs (k = 30).
 const HALF_LIFE = 1, PRIOR_PTS = 300, K_SURF = 30, PTS_PER_MATCH = 80, CHALL_ADJ = 0.018;
-function careerStats(js: string, wta: boolean) {
+// Force des adversaires : 0,025 par unité de log(classement adverse / 100), appris sur 2008-2026 (model/oppadj_eval.py).
+// Appliqué à la saison en cours avec le classement moyen des adversaires des derniers matchs de chaque niveau.
+const OPP_C = 0.025, LK_CHALL = Math.log(250 / 100);
+const lk = (rk: number | null) => Math.log(Math.min(1000, Math.max(1, rk ?? 500)) / 100);
+function careerStats(js: string, wta: boolean, recent: M[] = []) {
   const avgS = wta ? 0.56 : 0.64;
   const now = new Date(), t = now.getUTCFullYear() + (now.getTime() - Date.UTC(now.getUTCFullYear(), 0, 1)) / (365 * DAY);
   const years: Record<string, unknown>[] = [];
   let sw = 0, sv = 0, rw = 0, rv = 0, aw = 0, games = 0, sets = 0, tbs = 0, hw = 0, bw = 0, wsum = 0, m = 0, msAll = 0;
   // Saison en cours seulement (utilisée pour les calculs)
-  const S = { sw: 0, sv: 0, rw: 0, aw: 0, hw: 0, bw: 0, w: 0, games: 0, sets: 0, tbs: 0, m: 0, ms: 0 };
+  const S = { sw: 0, sv: 0, rw: 0, aw: 0, hw: 0, bw: 0, w: 0, games: 0, sets: 0, tbs: 0, m: 0, ms: 0, adjS: 0 };
+  const cy = recent.filter((m) => m.d !== null && new Date(m.d as number).getUTCFullYear() === Math.floor(t));
+  const meanLk = (xs: M[]) => (xs.length ? xs.reduce((a, m) => a + lk(m.oppRank), 0) / xs.length : null);
+  const lkTour = meanLk(cy.filter((m) => m.lvl !== "low")) ?? 0, lkChall = meanLk(cy.filter((m) => m.lvl === "low")) ?? LK_CHALL;
   for (const [id, lvl] of [["tour-years", "tour"], ["chall-years", "chall"]] as const) {
     const tb = table(js, id);
     if (!tb) continue;
@@ -215,8 +237,8 @@ function careerStats(js: string, wta: boolean) {
       if (y === Math.floor(t)) {
         S.m += M; S.ms += MS;
         if (MS > 0 && spw !== null && rpw !== null) {
-          const pts = MS * PTS_PER_MATCH;
-          S.sw += pts * (spw - adj); S.sv += pts; S.rw += pts * (rpw - adj); if (ace !== null) S.aw += pts * ace;
+          const pts = MS * PTS_PER_MATCH, oa = OPP_C * (lvl === "chall" ? lkChall : lkTour); // adversaires plus faibles = stats gonflées
+          S.sw += pts * (spw - oa); S.sv += pts; S.rw += pts * (rpw - oa); S.adjS += pts * oa; if (ace !== null) S.aw += pts * ace;
           if (hold !== null && brk !== null) { S.hw += MS * hold; S.bw += MS * brk; S.w += MS; }
         }
         if (st && gm) { S.games += gm[0] + gm[1]; S.sets += st[0] + st[1]; if (tbx) S.tbs += tbx[0] + tbx[1]; }
@@ -236,7 +258,8 @@ function careerStats(js: string, wta: boolean) {
   // Saison en cours : 600 points d'a priori vers la moyenne du circuit (testé sur 2024-2026, model/season_eval.py)
   const SP = 600;
   const season = {
-    year: Math.floor(t), matches: S.m, withStats: S.ms,
+    year: Math.floor(t), matches: S.m, withStats: S.ms, oppAdj: S.sv ? S.adjS / S.sv : 0,
+    oppRankAvg: cy.length ? Math.round(100 * Math.exp(meanLk(cy) as number)) : null,
     spw: (S.sw + SP * avgS) / (S.sv + SP), rpw: (S.rw + SP * (1 - avgS)) / (S.sv + SP),
     ace: (S.aw + SP * (wta ? 0.035 : 0.07)) / (S.sv + SP),
     hold: S.w ? S.hw / S.w : null, brk: S.w ? S.bw / S.w : null,
@@ -341,7 +364,8 @@ async function player(name: string) {
       const sp52 = splits52(js);
       h2hMap = careerH2h(js);
       const speed = serveSpeed(js);
-      const car = careerStats(js, !!elo && /wta/i.test(elo.tour));
+      const car = careerStats(js, !!elo && /wta/i.test(elo.tour), all);
+      const opps = opponentsList(js);
       const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
       const s60 = all.slice(0, 60); // surface, mental, service, niveaux : 60 derniers
       if (ms.length >= 3) {
@@ -478,6 +502,9 @@ async function player(name: string) {
           set1Over95: s1.length ? s1.filter((m) => (m.set1 as number) >= 10).length / s1.length : null,
           set1Sample: s1.length,
           set1Recent: all.filter((m) => m.set1 !== null).slice(0, 40).map((m) => ({ g: m.set1, s: m.surface, w: m.win, o: m.opp, d: m.date })),
+          recentMatches: all.slice(0, 40).map((m) => ({ d: m.date, t: m.tourney, s: m.surface, lv: m.lvl, o: m.opp, r: m.oppRank, w: m.win, sc: m.score,
+            spw: Math.round(m.spw * 1000) / 1000, rpw: m.rpw === null ? null : Math.round(m.rpw * 1000) / 1000, a: m.ace, bs: m.bps, bf: m.bpf, g1: m.set1 })),
+          opponents: opps,
         };
       }
     }
@@ -534,7 +561,7 @@ Deno.serve(async (req) => {
       h2h[a + "|" + b] = { a: c.a, b: c.b, n: c.a + c.b, career: true, tbA: c.tbA, tbN: c.tbN, first: c.first, lastDate: c.last, surf: recent ? recent.surf : {}, last: recent ? recent.last : null };
     } else if (recent) h2h[a + "|" + b] = recent;
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 8, players: res, h2h }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 9, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });
