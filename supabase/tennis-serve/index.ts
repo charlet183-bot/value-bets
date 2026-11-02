@@ -3,6 +3,7 @@
 //   -> { players: { "Taylor Fritz": {...} | null }, h2h: { "Taylor Fritz|Alexander Zverev": {...} } }
 // v5 : Elo par surface, fatigue, mental (balles de break, tie-breaks, sets décisifs), détail du service,
 //      niveau des tournois, tendance, main (gaucher/droitier), face-à-face.
+// v10 : full=1 -> les 18 tableaux Tennis Abstract complets (écran Duel).
 // v9 : saison corrigée selon la force des adversaires ; matchs récents détaillés ; tous les adversaires de la carrière.
 // v8 : stats de la saison en cours pour les calculs (career.season).
 // v7 : toute la carrière (saisons circuit + Challengers, surfaces) ; jeux du 1er set des derniers matchs.
@@ -142,6 +143,14 @@ function table(js: string, id: string) {
   const body = chunk.slice(chunk.indexOf("<tbody>"));
   const rows = body.split(/<tr[^>]*>/).slice(1).map((r) => [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => clean(m[1]))).filter((r) => r.length);
   return { head, rows };
+}
+// Tous les tableaux de la page joueur, tels quels (en-têtes + lignes), pour l'écran Duel de l'appli
+const TABLE_IDS = ["recent-results", "tour-years", "chall-years", "recent-finals", "year-end-rankings", "recent-events", "career-splits", "last52-splits",
+  "winners-errors", "serve-speed", "pbp-points", "pbp-games", "pbp-stats", "mcp-serve", "mcp-return", "mcp-rally", "mcp-tactics", "head-to-heads"];
+function allTables(js: string) {
+  const out: Record<string, { h: string[]; r: string[][] }> = {};
+  for (const id of TABLE_IDS) { const t = table(js, id); if (t && t.rows.length) out[id] = { h: t.head, r: t.rows.slice(0, 120) }; }
+  return out;
 }
 const num = (s: string | undefined) => { const v = parseFloat((s || "").replace("%", "")); return isFinite(v) ? v : null; };
 const wl = (s: string | undefined) => { const m = (s || "").match(/^(\d+)-(\d+)$/); return m ? [+m[1], +m[2]] : null; };
@@ -343,13 +352,13 @@ async function bio(key: string, tour: string) {
 }
 
 // ---------- Joueur
-const cache = new Map<string, { at: number; data: unknown; rows: M[]; h2h: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> }>();
+const cache = new Map<string, { at: number; data: unknown; tables?: Record<string, { h: string[]; r: string[][] }>; rows: M[]; h2h: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> }>();
 async function player(name: string) {
   const key = slug(name);
   if (!key || key.length > 60) return null;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit;
-  let data: unknown = null, all: M[] = [], h2hMap: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> = {};
+  let data: unknown = null, tables: Record<string, { h: string[]; r: string[][] }> = {}, all: M[] = [], h2hMap: Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }> = {};
   try {
     const eloMap = await elos();
     const elo = eloMap.get(norm(name)) || null;
@@ -366,6 +375,7 @@ async function player(name: string) {
       const speed = serveSpeed(js);
       const car = careerStats(js, !!elo && /wta/i.test(elo.tour), all);
       const opps = opponentsList(js);
+      tables = allTables(js);
       const ms = all.slice(0, 20); // forme et stats globales : 20 derniers matchs
       const s60 = all.slice(0, 60); // surface, mental, service, niveaux : 60 derniers
       if (ms.length >= 3) {
@@ -509,7 +519,7 @@ async function player(name: string) {
       }
     }
   } catch (_) { data = null; }
-  const entry = { at: Date.now(), data, rows: all, h2h: h2hMap };
+  const entry = { at: Date.now(), data, tables, rows: all, h2h: h2hMap };
   cache.set(key, entry);
   return entry;
 }
@@ -540,6 +550,7 @@ Deno.serve(async (req) => {
   if (!names.length) {
     return new Response(JSON.stringify({ error: "Paramètre players manquant" }), { status: 400, headers: { ...CORS, "Content-Type": "application/json" } });
   }
+  const full = url.searchParams.get("full") === "1" && names.length <= 4;
   const res: Record<string, unknown> = {};
   const rows: Record<string, M[]> = {};
   const careers: Record<string, Record<string, { w: number; l: number; tbW: number | null; tbN: number | null; first: string; last: string }>> = {};
@@ -547,7 +558,7 @@ Deno.serve(async (req) => {
   for (let i = 0; i < names.length; i += 8) {
     const part = names.slice(i, i + 8);
     const got = await Promise.all(part.map(player));
-    part.forEach((n, j) => { res[n] = got[j] ? got[j]!.data : null; rows[n] = got[j] ? got[j]!.rows : []; careers[n] = got[j] ? got[j]!.h2h : {}; });
+    part.forEach((n, j) => { res[n] = got[j] ? (full && got[j]!.data ? { ...(got[j]!.data as Record<string, unknown>), tables: got[j]!.tables || {} } : got[j]!.data) : null; rows[n] = got[j] ? got[j]!.rows : []; careers[n] = got[j] ? got[j]!.h2h : {}; });
   }
   const h2h: Record<string, unknown> = {};
   for (const pair of (url.searchParams.get("h2h") || "").split(";").slice(0, 60)) {
@@ -561,7 +572,7 @@ Deno.serve(async (req) => {
       h2h[a + "|" + b] = { a: c.a, b: c.b, n: c.a + c.b, career: true, tbA: c.tbA, tbN: c.tbN, first: c.first, lastDate: c.last, surf: recent ? recent.surf : {}, last: recent ? recent.last : null };
     } else if (recent) h2h[a + "|" + b] = recent;
   }
-  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 9, players: res, h2h }), {
+  return new Response(JSON.stringify({ source: "tennisabstract.com", version: 10, players: res, h2h }), {
     headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800" },
   });
 });

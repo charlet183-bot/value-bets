@@ -232,7 +232,7 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
   <header>
     <h1>Value Bets <span>Tennis</span></h1>
     <p class="sub">Tous les matchs, le pronostic et la value en un seul écran.</p>
-    <div class="row" id="topbar"><button id="go-home" class="small" type="button" hidden>← Matchs</button><span class="grow"></span><button id="go-bets" class="small" type="button">Mes paris</button><button id="go-comp" class="small" type="button">Calculateur jeux</button></div>
+    <div class="row" id="topbar"><button id="go-home" class="small" type="button" hidden>← Matchs</button><span class="grow"></span><button id="go-duel" class="small" type="button">⚔ Duel</button><button id="go-bets" class="small" type="button">Mes paris</button><button id="go-comp" class="small" type="button">Calculateur jeux</button></div>
   </header>
 
   <section id="view-all" class="wrap" style="padding:0">
@@ -267,6 +267,17 @@ body.has-slip{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
       <p class="note"><b>Jeux et 1er set</b> : match simulé point par point avec le service de chacun face au retour de l'autre, puis corrigé sur 43 000 matchs réels.</p>
       <p class="note">Touche un match pour la fiche complète : pronostic, analyse, tous les calculs expliqués, toutes les stats et les adversaires. Même un favori à 75 % perd un match sur quatre : fixe un budget.</p>
     </details>
+  </section>
+
+  <section id="view-duel" class="wrap" style="padding:0" hidden>
+    <div class="panel">
+      <div class="label">⚔ Duel : tout comparer</div>
+      <p class="note" style="margin:0">Aucun pronostic ici : toutes les infos disponibles sur les deux joueurs, côte à côte. En orange, le meilleur des deux.</p>
+      <div class="duo"><div class="field"><label class="label" for="d-a">Joueur A</label><input id="d-a" type="text" list="d-names" placeholder="Ex. Taylor Fritz"></div><div class="field"><label class="label" for="d-b">Joueur B</label><input id="d-b" type="text" list="d-names" placeholder="Ex. Jannik Sinner"></div></div>
+      <datalist id="d-names"></datalist>
+      <div class="row"><button id="d-swap" class="small" type="button">⇄</button><button id="d-go" class="primary grow" type="button">Comparer</button></div>
+    </div>
+    <div id="d-out" class="panel"></div>
   </section>
 
   <section id="view-scan" class="wrap" style="padding:0" hidden>
@@ -1809,7 +1820,7 @@ function analysisHtml(m,o){
   const bets=ws&&ws.length?`<div class="label">Parier</div><div class="oddrow">${m.sides.map(sd=>sd?winSel(m,sd):`<span class="odd none">–</span>`).join("")}</div>${vbest?`<div class="vb"><div class="who"><b>Value : ${esc(vbest.player)}</b><small>${esc(vbest.book)} · cote <span class="num">${odd(vbest.price)}</span> · cote juste Pinnacle ${odd(1/pinP(vbest))}</small></div><span class="edge">+${pct(vbest.pe)}</span><div class="go">${goHtml(vbest.book,vbest.link,surname(vbest.player))}</div></div>`:`<p class="note" style="margin:0">Pas de cote au-dessus du prix juste de Pinnacle (seuil ${pct(+$("minedge").value)}). Cote juste du pronostic : ${odd(1/pw)} pour ${esc(surn(wn))}.</p>`}`:"";
   const warn=`<p class="note" style="margin:0">Même à ${pct(pw)}, ${esc(wn)} perd ${pct(1-pw)} du temps. Ce pronostic n'est pas une garantie.</p>`;
   m.__s1=Object.fromEntries(S1_LINES.map(L=>[L,overOf(d1,L)]));
-  return prono+analyse+calc+bets+set1Block(m,d1)+warn+(m.h2h!==undefined?cmpTable({...m,a,b}):"");
+  return prono+`<div class="acts">${duelBtn(a,b)}<span class="note">Toutes les stats des deux joueurs, côte à côte</span></div>`+analyse+calc+bets+set1Block(m,d1)+warn+(m.h2h!==undefined?cmpTable({...m,a,b}):"");
 }
 $("a-close").onclick=()=>{$("asheet").hidden=true};
 $("asheet").addEventListener("click",e=>{if(e.target.id==="asheet")$("asheet").hidden=true});
@@ -1891,7 +1902,7 @@ function renderAll(list,demo){
       ${valHtml}
       ${speedGauge(m.a,m.b,m.A,m.B)}
       ${facts.length?`<div class="meta" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted)">${facts.map(x=>`<span>${x}</span>`).join("")}</div>`:""}
-      ${demo?"":`<div class="acts">${anBtn(an)}</div>`}</div>`}).join("");
+      ${demo?"":`<div class="acts">${anBtn(an)}${duelBtn(m.a,m.b)}</div>`}</div>`}).join("");
 }
 function showAll(fresh){
   // dernière recherche : celle de l'écran unique, sinon une ancienne recherche déjà payée (Gagnant, Jeux, Value)
@@ -1917,8 +1928,12 @@ $("q-go").onclick=()=>openMatch({a:$("q-a").value.trim(),b:$("q-b").value.trim()
   const sf=$("win-surf").closest(".field");slot.appendChild(sf);
 })();
 // Navigation : un seul écran, plus « Mes paris » et le calculateur de jeux
-function goView(v){for(const k of ["all","scan","win","jeux","comp","bets"])$("view-"+k).hidden=k!==v;$("go-home").hidden=v==="all";window.scrollTo(0,0)}
-$("go-home").onclick=()=>goView("all");$("go-bets").onclick=()=>{goView("bets");renderBets()};$("go-comp").onclick=()=>{goView("comp");if(!$("c-out").innerHTML)runComp()};
+function goView(v){for(const k of ["all","duel","scan","win","jeux","comp","bets"])$("view-"+k).hidden=k!==v;$("go-home").hidden=v==="all";window.scrollTo(0,0)}
+$("go-home").onclick=()=>goView("all");
+$("go-duel").onclick=()=>{goView("duel");$("d-names").innerHTML=[...new Set(lastAll.flatMap(m=>[m.a,m.b]))].sort().map(n=>`<option value="${esc(n)}">`).join("");
+  const last=store.get("vbt_duel",null);if(last&&!$("d-a").value){$("d-a").value=last[0];$("d-b").value=last[1]}};
+$("d-go").onclick=()=>runDuel($("d-a").value,$("d-b").value);
+$("d-swap").onclick=()=>{const x=$("d-a").value;$("d-a").value=$("d-b").value;$("d-b").value=x;if(DUEL&&DUEL.A)runDuel($("d-a").value,$("d-b").value)};$("go-bets").onclick=()=>{goView("bets");renderBets()};$("go-comp").onclick=()=>{goView("comp");if(!$("c-out").innerHTML)runComp()};
 
 // ===== Appli plein écran (écran d'accueil) : installation, hors ligne, transfert des données
 const STANDALONE=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
@@ -1943,6 +1958,249 @@ $("data-in").onclick=async()=>{
     $("data-msg").textContent=`${n} éléments importés. Rechargement…`;setTimeout(()=>location.reload(),600)}
   catch(e){$("data-msg").textContent="Code illisible : recopie-le en entier."}
 };
+// ===================== Écran Duel : tout comparer, sans aucun pronostic =====================
+// Données : les 18 tableaux de la page Tennis Abstract de chaque joueur (relais, full=1).
+// Chaque colonne : libellé français, explication, format, et sens (1 = plus haut c'est mieux, -1 = plus bas, 0 = neutre).
+const DCOL={
+  "M":["Matchs","Matchs joués","int",0],"W":["Victoires","","int",0],"L":["Défaites","","int",0],"Win%":["% de victoires","","pct",1],
+  "Set W-L":["Sets gagnés-perdus","","wl",1],"Set%":["% de sets gagnés","","pct",1],"Game W-L":["Jeux gagnés-perdus","","wl",1],"Game%":["% de jeux gagnés","","pct",1],
+  "TB W-L":["Tie-breaks gagnés-perdus","","wl",1],"TB%":["% de tie-breaks gagnés","","pct",1],"MS":["Matchs avec stats","Matchs dont les statistiques détaillées existent","int",0],
+  "Hld%":["Jeux de service gagnés","Jeux de service remportés","pct",1],"Brk%":["Breaks réussis","Jeux de retour remportés","pct",1],
+  "A%":["Aces","Aces par point servi","pct",1],"DF%":["Doubles fautes","Doubles fautes par point servi","pct",-1],
+  "1stIn":["1res balles passées","","pct",1],"1st%":["Points gagnés sur 1re balle","","pct",1],"2nd%":["Points gagnés sur 2e balle","","pct",1],
+  "SPW":["Points gagnés au service","","pct",1],"RPW":["Points gagnés au retour","","pct",1],"TPW":["Total des points gagnés","","pct",1],
+  "DR":["Dominance","Points gagnés au retour ÷ points perdus au service. Au-dessus de 1 : domine l'échange","num2",1],
+  "Best":["Meilleur résultat","","txt",0],"Yrs":["Années jouées","","int",0],"Surface":["Surface","","txt",0],"First":["Première fois","","txt",0],"Last":["Dernière fois","","txt",0],
+  "TB":["Tie-breaks joués","","int",0],"TB W":["Tie-breaks gagnés","","int",0],"TB L":["Tie-breaks perdus","","int",0],
+  "BPSvd%":["Balles de break sauvées","","pct",1],"BPCnv%":["Balles de break converties","","pct",1],"BPSvd":["Balles de break sauvées","","frac",1],
+  "Mtgs":["Rencontres","","int",0],
+  "ATP Rank":["Classement","","rank",-1],"WTA Rank":["Classement","","rank",-1],"Points":["Points au classement","","int",1],"Elo Rank":["Rang Elo","","rank",-1],"Elo":["Elo","Niveau calculé d'après tous les résultats et la force des adversaires","int",1],
+  "hElo Rank":["Rang Elo dur","","rank",-1],"hElo":["Elo sur dur","","int",1],"cElo Rank":["Rang Elo terre","","rank",-1],"cElo":["Elo sur terre","","int",1],"gElo Rank":["Rang Elo gazon","","rank",-1],"gElo":["Elo sur gazon","","int",1],
+  "Doubles: ATP Rank":["Classement en double","","rank",-1],"Doubles: WTA Rank":["Classement en double","","rank",-1],"D-Lo Rank":["Rang Elo en double","","rank",-1],"D-Lo":["Elo en double","","int",1],
+  // coups gagnants et fautes (Match Charting Project)
+  "Winners":["Coups gagnants","Aces compris, total","int",0],"UFEs":["Fautes directes","Total","int",0],"Ratio":["Gagnants ÷ fautes","","num1",1],"Wnr/Pt":["Coups gagnants par point","","pct",1],"UFE/Pt":["Fautes directes par point","","pct",-1],
+  "RallyWinners":["Gagnants en échange","Hors service, total","int",0],"RallyUFEs":["Fautes en échange","Total","int",0],"RallyRatio":["Gagnants ÷ fautes en échange","","num1",1],"Rally Wnr/Pt":["Gagnants en échange par point","","pct",1],"Rally UFE/Pt":["Fautes en échange par point","","pct",-1],
+  "FH Wnr/Pt":["Coups droits gagnants par point","","pct",1],"BH Wnr/Pt":["Revers gagnants par point","","pct",1],"vs Ratio":["Ratio gagnants/fautes de ses adversaires","Plus bas = il empêche l'adversaire de bien jouer","num1",-1],"vs Wnr/Pt":["Gagnants adverses par point","","pct",-1],"vs UFE/Pt":["Fautes adverses par point","Fautes qu'il provoque","pct",1],
+  // vitesse (mph -> km/h)
+  "Avg Speed":["Vitesse moyenne","Toutes balles confondues","mph",1],"1st Avg":["1re balle moyenne","","mph",1],"1st StDev":["Régularité 1re balle (écart-type)","Plus bas = plus régulier","mph",0],"1st T Avg":["1re balle au T","","mph",1],"1st Wide Avg":["1re balle extérieur","","mph",1],"Max 1st":["1re balle la plus rapide","","mph",1],"Min 1st":["1re balle la plus lente","","mph",0],
+  "2nd Avg":["2e balle moyenne","","mph",1],"2nd StDev":["Régularité 2e balle (écart-type)","","mph",0],"2nd T Avg":["2e balle au T","","mph",1],"2nd Wide Avg":["2e balle extérieur","","mph",1],"Max 2nd":["2e balle la plus rapide","","mph",1],"Min 2nd":["2e balle la plus lente","","mph",0],
+  // points importants
+  "GP Conv":["Balles de jeu converties au service","","pctc",1],"BP Conv":["Balles de break converties","","pctc",1],"SP Conv":["Balles de set converties","","pctc",1],"MP Conv":["Balles de match converties","","pctc",1],
+  "BP Saved":["Balles de break sauvées","","pctc",1],"SP Saved":["Balles de set sauvées","","pctc",1],"MP Saved":["Balles de match sauvées","","pctc",1],"TB SPW":["Points au service en tie-break","","pctc",1],"TB RPW":["Points au retour en tie-break","","pctc",1],
+  "BP Games":["Jeux de retour avec balle de break","Part des jeux de retour où il obtient au moins une balle de break","pctc",1],"BP Conv/BPG":["Break dans ces jeux","","pctc",1],"BreakBack%":["Débreak immédiat","Reprend le service juste après avoir été breaké","pctc",1],
+  "BPF Games":["Jeux de service avec balle de break concédée","","pctc",-1],"Hold/BPFG":["Service sauvé dans ces jeux","","pctc",1],"Consol%":["Break confirmé","Garde son service juste après avoir breaké","pctc",1],
+  "SvForSet":["Sert pour le set : réussi","","pctc",1],"SvStaySet":["Sert pour rester dans le set : réussi","","pctc",1],"SvForMatch":["Sert pour le match : réussi","","pctc",1],"SvStayMatch":["Sert pour rester dans le match : réussi","","pctc",1],
+  "BLR":["Sang-froid (BLR)","Importance des points gagnés ÷ importance des points perdus. Au-dessus de 1 : meilleur sur les points importants","num2",1],
+  "DR+":["Dominance ajustée","Dominance tenant compte de l'importance des points","num2",1],"EI":["Intensité des matchs","Indice d'émotion : matchs serrés, retournements","num1",0],"CBF":["Remontées","Facteur de comeback : capacité à revenir quand il est mené","num1",1],
+  "Deuce A%":["Aces côté égalité","","pct",1],"Deuce SPW%":["Points au service côté égalité","","pct",1],"Ad A%":["Aces côté avantage","","pct",1],"Ad SPW%":["Points au service côté avantage","","pct",1],"Deuce RPW%":["Points au retour côté égalité","","pct",1],"Ad RPW%":["Points au retour côté avantage","","pct",1],
+  // service en détail (Match Charting)
+  "Unret%":["Services non retournés","","pct",1],"<=3 W%":["Points de 3 coups ou moins gagnés","Points courts après son service","pct",1],"RiP W%":["Points gagnés quand le retour revient","","pct",1],"SvImpact":["Impact du service","Points gagnés grâce au service par rapport à la moyenne","pct",1],
+  "1st Unret%":["1re balle non retournée","","pct",1],"1st <=3 W%":["1re balle : points courts gagnés","","pct",1],"1st RiP W%":["1re balle : points gagnés quand ça revient","","pct",1],"1st SvImpact":["1re balle : impact","","pct",1],
+  "1st D Wide%":["1re balle extérieur côté égalité","Part des 1res balles servies à l'extérieur","pct",0],"1st A Wide%":["1re balle extérieur côté avantage","","pct",0],"1st BP Wide%":["1re balle extérieur sur balle de break","","pct",0],
+  "2nd Unret%":["2e balle non retournée","","pct",1],"2nd <=3 W%":["2e balle : points courts gagnés","","pct",1],"2nd RiP W%":["2e balle : points gagnés quand ça revient","","pct",1],"2ndAgg":["Agressivité 2e balle","Au-dessus de 0 : 2e balle plus agressive que la moyenne","int",0],
+  // retour en détail
+  "RiP%":["Retours remis en jeu","","pct",1],"RetWnr%":["Retours gagnants","","pct",1],"FH/BH":["Retours en coup droit / revers","","txt",0],"RDI":["Profondeur du retour","Indice de profondeur, plus haut = plus profond","num2",1],"Slice%":["Retours slicés","","pct",0],
+  "1st RiP%":["Retour sur 1re balle : remis en jeu","","pct",1],"1st RetWnr%":["Retour sur 1re balle : gagnants","","pct",1],"1st RDI":["Retour sur 1re balle : profondeur","","num2",1],"1st Slice%":["Retour sur 1re balle : slicés","","pct",0],
+  "2nd RiP%":["Retour sur 2e balle : remis en jeu","","pct",1],"2nd RiP W%":["Retour sur 2e balle : points gagnés","","pct",1],"2nd RetWnr%":["Retour sur 2e balle : gagnants","","pct",1],"2nd RDI":["Retour sur 2e balle : profondeur","","num2",1],"2nd Slice%":["Retour sur 2e balle : slicés","","pct",0],
+  // échanges
+  "RallyLen":["Longueur moyenne des échanges","Coups par point","num1",0],"RLen-Serve":["Échanges sur son service","","num1",0],"RLen-Return":["Échanges sur son retour","","num1",0],
+  "1-3 W%":["Points gagnés en 1 à 3 coups","","pct",1],"4-6 W%":["Points gagnés en 4 à 6 coups","","pct",1],"7-9 W%":["Points gagnés en 7 à 9 coups","","pct",1],"10+ W%":["Points gagnés en 10 coups ou plus","","pct",1],
+  "FH/GS":["Coups droits parmi les frappes de fond","","pct",0],"BH Slice%":["Revers slicés","","pct",0],"FHP":["Puissance du coup droit","Points gagnés grâce au coup droit (impact)","num1",1],"FHP/100":["Coup droit : impact pour 100 coups","","num1",1],"BHP":["Puissance du revers","","num1",1],"BHP/100":["Revers : impact pour 100 coups","","num1",1],
+  // tactique
+  "SnV Freq":["Service-volée (fréquence)","","pct",0],"SnV W%":["Service-volée : points gagnés","","pct",1],"Net Freq":["Montées au filet","","pct",0],"Net W%":["Points gagnés au filet","","pct",1],
+  "FH Wnr%":["Coups droits gagnants","","pct",1],"FH DTL Wnr%":["Coup droit long de ligne gagnant","","pct",1],"FH IO Wnr%":["Coup droit intérieur-extérieur gagnant","","pct",1],
+  "BH Wnr%":["Revers gagnants","","pct",1],"BH DTL Wnr%":["Revers long de ligne gagnant","","pct",1],"Drop Freq":["Amorties (fréquence)","","pct",0],"Drop Wnr%":["Amorties gagnantes","","pct",1],
+  "RallyAgg":["Agressivité en échange","Au-dessus de 0 : plus agressif que la moyenne","int",0],"ReturnAgg":["Agressivité au retour","","int",0],
+};
+const DCOL_T={"mcp-return":{"RiP W%":["Points gagnés quand son retour revient","","pct",1],"1st RiP W%":["Retour sur 1re balle : points gagnés","","pct",1]}};
+const SPLIT_FR={"Hard":"Dur","Clay":"Terre battue","Grass":"Gazon","Carpet":"Moquette","Grand Slams":"Grand Chelem","Masters":"Masters 1000","Other Tours":"Autres tournois ATP","Premier":"WTA 1000 / 500","Internationals":"WTA 250","Challengers":"Challengers","ITFs":"ITF",
+  "Best of 5":"En 3 sets gagnants","Best of 3":"En 2 sets gagnants","Finals":"Finales","Semi-finals":"Demi-finales","Quarter-finals":"Quarts de finale","vs Righties":"Contre droitiers","vs Lefties":"Contre gauchers","vs Top 10":"Contre le top 10","Davis Cup":"Coupe Davis","Olympics":"Jeux olympiques"};
+const TBL_FR={"mcp-serve":"Service en détail","mcp-return":"Retour en détail","mcp-rally":"Échanges","mcp-tactics":"Tactique et coups","winners-errors":"Coups gagnants et fautes","serve-speed":"Vitesse de service (radar)","pbp-points":"Points importants","pbp-games":"Jeux importants","pbp-stats":"Sang-froid, côtés égalité/avantage"};
+// clés uniques des colonnes (les groupes « 1st: », « 2nd: », « FH: »… s'appliquent aux colonnes suivantes)
+function dKeys(h){
+  const CONT=new Set(["Unret%","RiP W%","SvImpact","D Wide%","A Wide%","BP Wide%","RiP%","RetWnr%","RDI","Slice%","DTL Wnr%","IO Wnr%","Wnr%","Freq","<=3 W%"]);
+  let g=null,tb=false;const out=[];
+  h.forEach((x,i)=>{let k=x;const m=x.match(/^(1st|2nd|FH|BH|Drop):\s*(.*)$/);
+    if(m){g=m[1];k=g+" "+m[2]}
+    else if(x===""){k=i===6?"Match":(g?g+" ":"")+"<=3 W%"}
+    else if(x==="TB"){tb=true;g=null}
+    else if(tb&&(x==="W"||x==="L")){k="TB "+x}
+    else if(g&&CONT.has(x))k=g+" "+x;
+    else{g=null;if(x!=="W"&&x!=="L")tb=false}
+    if(x==="TB%")tb=false;
+    out.push(k)});
+  return out;
+}
+// valeur numérique (pour comparer) + affichage
+function dVal(raw,fmt){
+  const s=String(raw==null?"":raw).trim();if(!s||s==="-"||s==="—")return{v:null,t:"–"};
+  if(fmt==="txt")return{v:null,t:esc(s)};
+  if(fmt==="wl"){const m=s.match(/^(\d+)-(\d+)$/);return m?{v:+m[1]/Math.max(1,+m[1]+ +m[2]),t:`${m[1]}-${m[2]}`}:{v:null,t:esc(s)}}
+  if(fmt==="frac"){const m=s.match(/^(\d+)\/(\d+)$/);return m?{v:+m[2]?+m[1]/+m[2]:null,t:`${m[1]}/${m[2]}`}:{v:null,t:esc(s)}}
+  if(fmt==="pctc"){let m=s.match(/^(-?[\d.]+)%\s*\((\d+)\/(\d+)\)$/);if(m)return{v:+m[1]/100,t:`${m[1].replace(".",",")} %<br><small>${m[2]}/${m[3]}</small>`};
+    m=s.match(/^(\d+)\/(\d+)$/);if(m)return{v:+m[2]?+m[1]/+m[2]:null,t:`${m[1]}/${m[2]}`};
+    m=s.match(/^(-?[\d.]+)%$/);if(m)return{v:+m[1]/100,t:m[1].replace(".",",")+" %"};return{v:null,t:esc(s)}}
+  const n=parseFloat(s.replace("%",""));if(!isFinite(n))return{v:null,t:esc(s)};
+  if(fmt==="pct")return{v:n/100,t:s.replace(".",",").replace("%"," %")};
+  if(fmt==="mph")return{v:n,t:Math.round(n*KMH)+" km/h"};
+  if(fmt==="rank")return{v:n,t:"#"+Math.round(n)};
+  if(fmt==="int")return{v:n,t:String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g," ")};
+  return{v:n,t:(fmt==="num2"?n.toFixed(2):fmt==="num1"?n.toFixed(1):String(n)).replace(".",",")};
+}
+const dT=(P,id)=>P&&P.tables&&P.tables[id]||null;
+function dRow(T,pred){if(!T)return null;const r=T.r.find(pred);return r?{keys:dKeys(T.h),r}:null}
+// compare deux lignes colonne par colonne ; skip = colonnes à ignorer
+function dCompare(ra,rb,skip,tid){
+  const keys=(ra||rb).keys,seen=new Set(),rows=[];let wa=0,wb=0;
+  keys.forEach((k,i)=>{if(skip.includes(k)||seen.has(k))return;seen.add(k);
+    const def=(tid&&DCOL_T[tid]&&DCOL_T[tid][k])||DCOL[k];if(!def)return; // colonnes inconnues : on ne devine pas
+    const ia=ra?ra.keys.indexOf(k):-1,ib=rb?rb.keys.indexOf(k):-1;
+    const a=dVal(ia>=0?ra.r[ia]:null,def[2]),b=dVal(ib>=0?rb.r[ib]:null,def[2]);
+    if(a.v==null&&b.v==null&&a.t==="–"&&b.t==="–")return;
+    let ca="",cb="";if(def[3]&&a.v!=null&&b.v!=null&&a.v!==b.v){const better=def[3]>0?a.v>b.v:a.v<b.v;if(better){ca="best";wa++}else{cb="best";wb++}}
+    rows.push(`<tr><td class="${ca}">${a.t}</td><th>${esc(def[0])}${def[1]?`<br><small>${esc(def[1])}</small>`:""}</th><td class="${cb}">${b.t}</td></tr>`)});
+  return{html:rows.join(""),wa,wb,n:rows.length};
+}
+let DUEL=null; // {a,b,A,B,h2h,sel:{}}
+function dTable(body,score){return `<table class="cmp"><thead><tr><td>${surn(DUEL.a)}</td><td>${score||""}</td><td>${surn(DUEL.b)}</td></tr></thead><tbody>${body}</tbody></table>`}
+const dScore=c=>c.wa+c.wb?`<small>meilleur : ${c.wa} – ${c.wb}</small>`:"";
+// bloc avec sélecteur (catégorie, saison, période)
+function dSelectBlock(key,title,opts,render,note){
+  const cur=DUEL.sel[key]&&opts.some(o=>o[0]===DUEL.sel[key])?DUEL.sel[key]:(opts[0]||[])[0];
+  if(!opts.length)return"";
+  const c=render(cur);
+  return `<details class="grp" data-dkey="${key}"${DUEL.open[key]?" open":""}><summary>${title}</summary>
+    <div class="row" style="margin:6px 0"><select class="dsel grow" data-k="${key}">${opts.map(([v,l])=>`<option value="${esc(v)}"${v===cur?" selected":""}>${esc(l)}</option>`).join("")}</select></div>
+    ${c.n?dTable(c.html,dScore(c)):'<p class="note">Pas de données pour les deux joueurs sur ce choix.</p>'}${note?`<p class="note" style="margin:4px 0 0">${note}</p>`:""}</details>`;
+}
+function splitOpts(id){
+  const lab=new Map();for(const P of [DUEL.A,DUEL.B]){const T=dT(P,id);if(T)T.r.forEach(r=>{if(r[0])lab.set(r[0],SPLIT_FR[r[0]]||r[0])})}
+  return [...lab.entries()];
+}
+function yearOpts(id){const s=new Set();for(const P of [DUEL.A,DUEL.B]){const T=dT(P,id);if(T)T.r.forEach(r=>{if(r[0])s.add(r[0])})}
+  return [...s].sort((x,y)=>(x==="Career")-(y==="Career")||String(y).localeCompare(String(x))).map(y=>[y,y==="Career"?"Toute la carrière":y])}
+// lignes « résumé » des tableaux match par match : « Career (338 matches) », « 2026 (13 matches) »
+function sumOpts(id){const m=new Map();for(const P of [DUEL.A,DUEL.B]){const T=dT(P,id);if(T)T.r.forEach(r=>{const x=String(r[0]||"").match(/^(Career|\d{4}) \((\d+) match/);if(x&&!m.has(x[1]))m.set(x[1],x[1]==="Career"?"Toute la carrière":"Saison "+x[1])})}
+  return [...m.entries()].sort((x,y)=>(y[0]==="Career")-(x[0]==="Career")||y[0].localeCompare(x[0]))}
+function sumRow(P,id,key){return dRow(dT(P,id),r=>String(r[0]||"").startsWith(key+" ("))}
+const sumN=(P,id,key)=>{const x=sumRow(P,id,key);const m=x&&String(x.r[0]).match(/\((\d+) match/);return m?+m[1]:0};
+function dIdentity(){
+  const A=DUEL.A,B=DUEL.B,ye=P=>dRow(dT(P,"year-end-rankings"),r=>/^Current/.test(r[0]));
+  const c=ye(A)||ye(B)?dCompare(ye(A),ye(B),["Year"]):{html:"",wa:0,wb:0,n:0};
+  const extra=[];
+  const best=(P,ci)=>{const T=dT(P,"year-end-rankings");if(!T)return null;const k=dKeys(T.h),i=k.indexOf(ci);if(i<0)return null;const v=T.r.map(r=>parseFloat(r[i])).filter(x=>isFinite(x)&&x>0);return v.length?Math.min(...v):null};
+  const bestElo=P=>{const T=dT(P,"year-end-rankings");if(!T)return null;const i=dKeys(T.h).indexOf("Elo");const v=T.r.map(r=>parseFloat(r[i])).filter(isFinite);return v.length?Math.max(...v):null};
+  const rkKey=dT(A,"year-end-rankings")&&dKeys(dT(A,"year-end-rankings").h).includes("WTA Rank")?"WTA Rank":"ATP Rank";
+  const cm=(lab,va,vb,dir,f)=>{let ca="",cb="";if(dir&&va!=null&&vb!=null&&va!==vb){if(dir>0?va>vb:va<vb)ca="best";else cb="best"}extra.push(`<tr><td class="${ca}">${f(va)}</td><th>${lab}</th><td class="${cb}">${f(vb)}</td></tr>`)};
+  cm("Meilleur classement de fin d'année",best(A,rkKey),best(B,rkKey),-1,v=>v==null?"–":"#"+v);
+  cm("Meilleur Elo de fin d'année",bestElo(A),bestElo(B),1,v=>v==null?"–":Math.round(v));
+  cm("Âge",A.elo&&A.elo.age,B.elo&&B.elo.age,0,v=>v==null?"–":Math.floor(v)+" ans");
+  const fin=P=>dRow(dT(P,"career-splits"),r=>r[0]==="Finals");const tw=x=>x?+x.r[x.keys.indexOf("W")]:null,tm=x=>x?+x.r[x.keys.indexOf("M")]:null;
+  cm("Titres (circuit principal)",tw(fin(A)),tw(fin(B)),1,v=>v==null?"–":v);
+  cm("Finales jouées",tm(fin(A)),tm(fin(B)),0,v=>v==null?"–":v);
+  const car=P=>dRow(dT(P,"tour-years"),r=>r[0]==="Career");const cM=x=>x?+x.r[x.keys.indexOf("M")]:null,cW=x=>x?x.r[x.keys.indexOf("Win%")]:null;
+  cm("Matchs sur le circuit principal",cM(car(A)),cM(car(B)),0,v=>v==null?"–":v);
+  const chl=P=>dRow(dT(P,"chall-years"),r=>r[0]==="Career");cm("Matchs en Challenger",cM(chl(A)),cM(chl(B)),0,v=>v==null?"–":v);
+  const ny=P=>{const T=dT(P,"tour-years");return T?T.r.filter(r=>/^\d{4}$/.test(r[0])).length:null};cm("Saisons sur le circuit",ny(A),ny(B),0,v=>v==null?"–":v);
+  cm("Vitesse moyenne de service",(speedInfo(DUEL.a,A)||{}).kmh,(speedInfo(DUEL.b,B)||{}).kmh,1,v=>v==null?"–":Math.round(v)+" km/h");
+  cm("Main",handOf(A),handOf(B),0,v=>v||"–");
+  return `<details class="grp" open><summary>Identité et classement</summary>${dTable(c.html+extra.join(""),dScore(c))}</details>`;
+}
+function dRankHistory(){
+  const ys=new Map(),get=(P)=>{const T=dT(P,"year-end-rankings");if(!T)return{};const k=dKeys(T.h),o={};T.r.forEach(r=>{o[r[0]]={rk:r[1],elo:r[k.indexOf("Elo")]}});return o};
+  const a=get(DUEL.A),b=get(DUEL.B);[...Object.keys(a),...Object.keys(b)].forEach(y=>ys.set(y,1));
+  const rows=[...ys.keys()].map(y=>{const x=a[y]||{},z=b[y]||{},ra=parseFloat(x.rk),rb=parseFloat(z.rk);
+    const ca=isFinite(ra)&&isFinite(rb)&&ra<rb?"best":"",cb=isFinite(ra)&&isFinite(rb)&&rb<ra?"best":"";
+    return `<tr><td class="${ca}">${x.rk?"#"+esc(x.rk):"–"}<br><small>Elo ${esc(x.elo||"–")}</small></td><th>${esc(/^Current/.test(y)?"Actuel":y)}</th><td class="${cb}">${z.rk?"#"+esc(z.rk):"–"}<br><small>Elo ${esc(z.elo||"–")}</small></td></tr>`}).join("");
+  return rows?`<details class="grp"><summary>Classement année par année</summary>${dTable(rows)}</details>`:"";
+}
+function dEvents(){
+  const ev=P=>{const T=dT(P,"recent-events");if(!T)return{};const k=dKeys(T.h),o={};T.r.forEach(r=>{o[r[0]]={W:r[k.indexOf("W")],L:r[k.indexOf("L")],best:r[k.indexOf("Best")],yrs:r[k.indexOf("Yrs")],surf:r[k.indexOf("Surface")],last:r[k.indexOf("Last")],row:r,keys:k}});return o};
+  const a=ev(DUEL.A),b=ev(DUEL.B),names=[...new Set([...Object.keys(a),...Object.keys(b)])];
+  if(!names.length)return"";
+  const both=names.filter(n=>a[n]&&b[n]),only=names.filter(n=>!(a[n]&&b[n]));
+  const cell=x=>x?`${esc(x.W)}-${esc(x.L)}<br><small>meilleur ${esc(x.best||"–")} · ${esc(x.yrs||"?")} an${+x.yrs>1?"s":""}</small>`:"–";
+  const rk=x=>x?(+x.W)/Math.max(1,+x.W+ +x.L):null;
+  const row=n=>{const x=a[n],z=b[n],va=rk(x),vb=rk(z);const ca=va!=null&&vb!=null&&va>vb?"best":"",cb=va!=null&&vb!=null&&vb>va?"best":"";
+    return `<tr><td class="${ca}">${cell(x)}</td><th>${esc(n)}${(x||z).surf?`<br><small>${SURF[(x||z).surf]||esc((x||z).surf)}</small>`:""}</th><td class="${cb}">${cell(z)}</td></tr>`};
+  // détail complet d'un tournoi commun
+  const det=both.map(n=>{const c=dCompare({keys:a[n].keys,r:a[n].row},{keys:b[n].keys,r:b[n].row},["Event","Surface","Yrs","First","Last","Best","M","W","L","MS"]);return c.n?`<details class="grp"><summary>${esc(n)} : toutes les stats</summary>${dTable(c.html,dScore(c))}</details>`:""}).join("");
+  return `<details class="grp"><summary>Tournois (${both.length} en commun)</summary>${dTable(both.map(row).join("")+only.map(row).join(""))}${det}<p class="note" style="margin:4px 0 0">Bilan de chacun dans les tournois qu'il joue le plus (victoires-défaites, meilleur résultat, nombre d'éditions).</p></details>`;
+}
+function dH2H(){
+  const A=DUEL.A,B=DUEL.B,find=(P,other)=>{const T=dT(P,"head-to-heads");if(!T)return null;const o=normName(other),k=dKeys(T.h);const r=T.r.find(x=>normName(String(x[1]).replace(/\[[^\]]*\]/g,""))===o);return r?{keys:k,r}:null};
+  const ra=find(A,DUEL.b),rb=find(B,DUEL.a);
+  let html="";
+  if(ra||rb){const c=dCompare(ra,rb,["Mtgs","Opponent","W","L","Win%","TB","TB W","TB L","TB%","First","Last","MS"]);
+    const x=ra||rb,k=x.keys,W=ra?ra.r[k.indexOf("W")]:rb.r[k.indexOf("L")],L=ra?ra.r[k.indexOf("L")]:rb.r[k.indexOf("W")];
+    const tbw=ra?ra.r[k.indexOf("TB W")]:rb.r[k.indexOf("TB L")],tbl=ra?ra.r[k.indexOf("TB L")]:rb.r[k.indexOf("TB W")];
+    html=`<p style="margin:6px 0"><b class="num">${surn(DUEL.a)} ${esc(W)} – ${esc(L)} ${surn(DUEL.b)}</b><br><small class="note">Tie-breaks entre eux ${esc(tbw||0)}-${esc(tbl||0)} · de ${esc(x.r[k.indexOf("First")])} à ${esc(x.r[k.indexOf("Last")])}</small></p>${c.n?dTable(c.html,dScore(c)):""}<p class="note" style="margin:4px 0 0">Statistiques de chacun dans leurs matchs l'un contre l'autre.</p>`}
+  else{const h=DUEL.h2h;html=h&&h.n?`<p>${surn(DUEL.a)} ${h.a} – ${h.b} ${surn(DUEL.b)}</p>`:'<p class="note">Jamais rencontrés sur le circuit principal (ou pas dans leur liste d\'adversaires fréquents).</p>'}
+  return `<details class="grp" open><summary>Face-à-face</summary>${html}</details>`;
+}
+function dOpponents(){
+  const L=P=>{const T=dT(P,"head-to-heads");if(!T)return[];const k=dKeys(T.h);return T.r.map(r=>({n:String(r[1]).replace(/\[[^\]]*\]/g,"").trim(),c:(String(r[1]).match(/\[([A-Z]{3})\]/)||[])[1]||"",W:r[k.indexOf("W")],L:r[k.indexOf("L")],spw:r[k.indexOf("SPW")],rpw:r[k.indexOf("RPW")],last:r[k.indexOf("Last")]}))};
+  const a=L(DUEL.A),b=L(DUEL.B);if(!a.length&&!b.length)return"";
+  const bm=new Map(b.map(x=>[normName(x.n),x])),am=new Map(a.map(x=>[normName(x.n),x]));
+  const common=a.filter(x=>bm.has(normName(x.n)));
+  const cr=x=>x?`${esc(x.W)}-${esc(x.L)}<br><small>service ${esc(x.spw||"–")} · retour ${esc(x.rpw||"–")}</small>`:"–";
+  const rowsC=common.map(x=>{const z=bm.get(normName(x.n)),va=+x.W/Math.max(1,+x.W+ +x.L),vb=+z.W/Math.max(1,+z.W+ +z.L);return `<tr><td class="${va>vb?"best":""}">${cr(x)}</td><th>${esc(x.n)}</th><td class="${vb>va?"best":""}">${cr(z)}</td></tr>`}).join("");
+  const list=(arr,nm)=>`<details class="grp"><summary>Adversaires les plus fréquents de ${surn(nm)} (${arr.length})</summary><table class="cmp"><tbody>${arr.map(x=>`<tr><th style="text-align:left">${esc(x.n)} <small>${esc(x.c)}</small></th><td>${esc(x.W)}-${esc(x.L)}</td><td><small>service ${esc(x.spw||"–")}<br>retour ${esc(x.rpw||"–")}</small></td></tr>`).join("")}</tbody></table></details>`;
+  return `<details class="grp"><summary>Adversaires communs de carrière (${common.length})</summary>${rowsC?dTable(rowsC):'<p class="note">Aucun parmi leurs adversaires les plus fréquents.</p>'}</details>`+list(a,DUEL.a)+list(b,DUEL.b);
+}
+function dMatches(id,title){
+  const one=(P,nm)=>{const t=dT(P,id);if(!t)return"";
+    return `<details class="grp"><summary>${title} : ${surn(nm)} (${t.r.length})</summary><table class="cmp"><tbody>${t.r.map(r=>`<tr><td style="width:24%"><small>${esc(r[0]||"")}</small><br><small>${esc(r[3]||"")} · ${SURF[r[2]]||esc(r[2]||"")}</small></td><th style="text-align:left">${esc(r[1]||"")}<br><small>${esc(r[6]||"")}</small></th><td style="width:30%">${esc(r[7]||"")}<br><small>${r[9]?"aces "+esc(r[9]):""}${r[10]?" · DF "+esc(r[10]):""}${r[12]?" · 1re "+esc(r[12]):""}${r[15]?" · "+esc(r[15]):""}</small></td></tr>`).join("")}</tbody></table></details>`};
+  return one(DUEL.A,DUEL.a)+one(DUEL.B,DUEL.b);
+}
+function dSumBlock(id,title,note){
+  const opts=sumOpts(id);if(!opts.length)return"";
+  return dSelectBlock(id,title,opts,key=>{const ra=sumRow(DUEL.A,id,key),rb=sumRow(DUEL.B,id,key);if(!ra&&!rb)return{n:0};
+    const c=dCompare(ra,rb,["Match","Result"],id);const na=sumN(DUEL.A,id,key),nb=sumN(DUEL.B,id,key);
+    c.html=`<tr><td>${na||"–"}</td><th>Matchs mesurés</th><td>${nb||"–"}</td></tr>`+c.html;return c},note);
+}
+function duelHtml(){
+  const A=DUEL.A,B=DUEL.B;
+  if(!A||!B||!A.tables||!B.tables){const miss=[!A&&DUEL.a,!B&&DUEL.b].filter(Boolean);return `<p class="err">Fiche introuvable pour ${esc(miss.join(" et ")||"un joueur")}. Tape le prénom et le nom complets, comme sur Tennis Abstract (ex. Taylor Fritz).</p>`}
+  const parts=[];
+  parts.push(dIdentity(),dH2H());
+  parts.push(dSelectBlock("cs","Bilan de carrière, par catégorie",[["__all","Toute la carrière (circuit principal)"],...splitOpts("career-splits")],k=>{
+    const ra=k==="__all"?dRow(dT(A,"tour-years"),r=>r[0]==="Career"):dRow(dT(A,"career-splits"),r=>r[0]===k),rb=k==="__all"?dRow(dT(B,"tour-years"),r=>r[0]==="Career"):dRow(dT(B,"career-splits"),r=>r[0]===k);
+    return ra||rb?dCompare(ra,rb,["Split","Year","Best"]):{n:0}},"Catégories : surfaces, niveaux de tournoi, format, tours (finales, demies, quarts), contre droitiers/gauchers, contre le top 10."));
+  parts.push(dSelectBlock("l52","52 dernières semaines, par catégorie",splitOpts("last52-splits"),k=>{const ra=dRow(dT(A,"last52-splits"),r=>r[0]===k),rb=dRow(dT(B,"last52-splits"),r=>r[0]===k);return ra||rb?dCompare(ra,rb,["Split"]):{n:0}}));
+  parts.push(dSelectBlock("ty","Saison par saison (circuit principal)",yearOpts("tour-years"),k=>{const ra=dRow(dT(A,"tour-years"),r=>r[0]===k),rb=dRow(dT(B,"tour-years"),r=>r[0]===k);
+    const c=ra||rb?dCompare(ra,rb,["Year"]):{n:0,html:"",wa:0,wb:0};const bst=x=>x?x.r[x.keys.indexOf("Best")]||"–":"–";if(ra||rb)c.html=`<tr><td>${esc(bst(ra))}</td><th>Meilleur résultat</th><td>${esc(bst(rb))}</td></tr>`+c.html,c.n++;return c}));
+  parts.push(dSelectBlock("cy","Saison par saison (Challengers)",yearOpts("chall-years"),k=>{const ra=dRow(dT(A,"chall-years"),r=>r[0]===k),rb=dRow(dT(B,"chall-years"),r=>r[0]===k);return ra||rb?dCompare(ra,rb,["Year","Best"]):{n:0}}));
+  parts.push(dRankHistory());
+  // ce que l'appli calcule déjà (sans pronostic) : saison corrigée, 1er set, adversaires de la saison, retour selon la puissance du serveur
+  parts.push(dSumBlock("pbp-points","Points importants (balles de break, de set, de match, tie-breaks)","Calculé sur les matchs dont le point par point existe (surtout les grands tournois)."));
+  parts.push(dSumBlock("pbp-games","Jeux importants (débreak, break confirmé, servir pour le set)"));
+  parts.push(dSumBlock("pbp-stats","Sang-froid, côté égalité / côté avantage"));
+  parts.push(dSumBlock("serve-speed","Vitesse de service (radar)","Mesurée seulement à Wimbledon et à l'US Open."));
+  for(const id of ["mcp-serve","mcp-return","mcp-rally","mcp-tactics","winners-errors"])parts.push(dSumBlock(id,TBL_FR[id]+" (Match Charting)","Match Charting Project : matchs codés coup par coup par des bénévoles. Échantillon plus petit, surtout des grands matchs."));
+  parts.push(dEvents(),dOpponents());
+  parts.push(dMatches("recent-results","Derniers matchs"),dMatches("recent-finals","Dernières finales"));
+  // tableau existant (forme, fatigue, surface, service et retour, mental, vitesse…) : informations, pas de pronostic
+  parts.push(`<details class="grp"><summary>Forme, fatigue, mental, saison, 1er set, adversaires</summary><p class="note" style="margin:4px 0">Niveau, forme pondérée par les adversaires, fatigue, surfaces, service et retour récents, saison en cours corrigée, 1er set, mental, adversaires de la saison, retour selon la puissance du serveur, adversaires en commun.</p>${cmpTable({a:DUEL.a,b:DUEL.b,A,B,st:null,h2h:DUEL.h2h}).replace('<details class="allstats"><summary>Comparer toutes les stats</summary>','<div>').replace(/<\/details>$/,"</div>")}</details>`);
+  return parts.filter(Boolean).join("");
+}
+async function runDuel(a,b){
+  a=(a||"").trim();b=(b||"").trim();if(!a||!b)return;
+  $("d-a").value=a;$("d-b").value=b;store.set("vbt_duel",[a,b]);
+  $("d-out").innerHTML='<p class="note">Récupération de toutes les données des deux joueurs… (10 à 30 secondes)</p>';
+  let A=null,B=null,h2h=null;
+  try{const r=await fetch(STATS+"?full=1&players="+encodeURIComponent(a+","+b)+"&h2h="+encodeURIComponent(a+"|"+b));
+    if(r.ok){const j=await r.json();A=j.players&&j.players[a];B=j.players&&j.players[b];h2h=j.h2h&&j.h2h[a+"|"+b]||null;
+      if(A)statCache[a]=A;if(B)statCache[b]=B;h2hCache[pairKey([a,b])]=h2h}}catch(e){}
+  DUEL={a,b,A,B,h2h,sel:(DUEL&&DUEL.a===a&&DUEL.b===b)?DUEL.sel:{},open:{}};
+  $("d-out").innerHTML=duelHtml();
+}
+function openDuel(a,b){goView("duel");if(a&&b)runDuel(a,b)}
+document.addEventListener("change",e=>{const s=e.target.closest&&e.target.closest("select.dsel");if(!s||!DUEL)return;
+  DUEL.sel[s.dataset.k]=s.value;document.querySelectorAll("#d-out details[data-dkey]").forEach(d=>DUEL.open[d.dataset.dkey]=d.open);DUEL.open[s.dataset.k]=true;
+  const y=window.scrollY;$("d-out").innerHTML=duelHtml();window.scrollTo(0,y)});
+document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-duel]");if(!t)return;const d=JSON.parse(t.dataset.duel);$("asheet").hidden=true;openDuel(d.a,d.b)});
+const duelBtn=(a,b)=>`<button class="small abtn" type="button" data-duel="${esc(JSON.stringify({a,b}))}">⚔ Duel</button>`;
 function setTab(t){goView(t)}
 $("tab-scan").onclick=()=>setTab("scan");$("tab-win").onclick=()=>setTab("win");$("tab-jeux").onclick=()=>setTab("jeux");$("tab-comp").onclick=()=>{setTab("comp");if(!$("c-out").innerHTML)runComp()};$("tab-bets").onclick=()=>setTab("bets");
 // Circuit : tous, hommes (ATP) ou femmes (WTA), mémorisé et commun aux onglets Value, Gagnant et Jeux
